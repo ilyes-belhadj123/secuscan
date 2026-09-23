@@ -1,0 +1,270 @@
+﻿Issue ID,Parent ID,Issue Type,Summary,Description,Priority,Story Points,Original Estimate (h),Sprint,Epic,Labels
+SS-1,,Task,"Initialiser repos, CI et workers","FastAPI, React/Vite, Redis, workers d'analyse Docker éphémères.
+
+Spécifications techniques :
+Monorepo `apps/api` (FastAPI 3.12), `apps/web` (React 18 + Vite), `workers/scanner` (ARQ + Redis). CI : lint, tests, build d'images. Image scanner séparée contenant les outils d'analyse.
+
+Critères d'acceptation :
+- CI verte
+- un worker exécute une tâche isolée",Highest,5,11,S1,Socle technique,devops
+SS-1.1,SS-1,Sub-task,Structure monorepo + lint,Rôle : DevOps,Highest,,3,S1,Socle technique,devops
+SS-1.2,SS-1,Sub-task,Workers ARQ + Redis,Rôle : DevOps,Highest,,4,S1,Socle technique,devops
+SS-1.3,SS-1,Sub-task,CI + build des images,Rôle : DevOps,Highest,,4,S1,Socle technique,devops
+SS-2,,Story,Comptes et organisations,"En tant que CTO, je crée une organisation et invite mon équipe.
+
+Spécifications techniques :
+`organizations`, `memberships` (role: owner|admin|member), `invitations` (token, expiry). Toutes les requêtes filtrées par `org_id` via dépendance FastAPI `current_org()`. Tests d'isolation cross-tenant.
+
+Critères d'acceptation :
+- Rôles admin/membre
+- invitations e-mail
+- isolation multi-tenant testée",Highest,5,18,S1,Authentification,backend
+SS-2.1,SS-2,Sub-task,Modèles + endpoints organisations et invitations,Rôle : Backend,Highest,,6,S1,Authentification,be
+SS-2.2,SS-2,Sub-task,Middleware d'isolation multi-tenant,Rôle : Backend,Highest,,4,S1,Authentification,be
+SS-2.3,SS-2,Sub-task,"Écrans organisation, membres, invitations",Rôle : Frontend web,Highest,,5,S1,Authentification,fe
+SS-2.4,SS-2,Sub-task,Tests d'isolation,Rôle : QA,Highest,,3,S1,Authentification,qa
+SS-3,,Story,Upload d'archive ZIP et collage de code,"En tant que développeur, j'importe mon code par ZIP ou collage.
+
+Spécifications techniques :
+`POST /projects/{id}/uploads` (ZIP ≤ 100 Mo, protection zip-slip et zip-bomb) ou `POST /snippets`. Détection langages par extensions + fichiers manifestes. Stockage temporaire chiffré, suppression après scan.
+
+Critères d'acceptation :
+- Limite de taille
+- détection des langages
+- archive supprimée après analyse",High,3,11,S1,Import,"backend,web"
+SS-3.1,SS-3,Sub-task,"Upload sécurisé (zip-slip, taille, ratio)",Rôle : Backend,High,,5,S1,Import,be
+SS-3.2,SS-3,Sub-task,Détection des langages,Rôle : Backend,High,,2,S1,Import,be
+SS-3.3,SS-3,Sub-task,Écran d'import (drag & drop + éditeur),Rôle : Frontend web,High,,4,S1,Import,fe
+SS-4,,Task,Sandbox d'analyse éphémère,"Chaque analyse tourne dans un conteneur isolé, sans réseau sortant, détruit ensuite.
+
+Spécifications techniques :
+Conteneur par scan : utilisateur non-root, FS en lecture seule sauf `/work`, `--network none`, limites CPU/RAM/temps, destruction en fin de job. Aucune exécution du code analysé.
+
+Critères d'acceptation :
+- Aucun accès réseau
+- suppression vérifiée
+- test d'isolation",Highest,8,15,S1,Sécurité plateforme,"sécurité,devops"
+SS-4.1,SS-4,Sub-task,Profil de conteneur durci,Rôle : DevOps,Highest,,6,S1,Sécurité plateforme,devops
+SS-4.2,SS-4,Sub-task,Orchestration job → conteneur → résultats,Rôle : Backend,Highest,,6,S1,Sécurité plateforme,be
+SS-4.3,SS-4,Sub-task,Tests d'isolation réseau et FS,Rôle : QA,Highest,,3,S1,Sécurité plateforme,qa
+SS-5,,Story,Intégrer le moteur de règles statiques,"Exécuter un moteur SAST open source sur Python, JS/TS, PHP, Java.
+
+Spécifications techniques :
+Adaptateur autour d'un moteur SAST open source (sortie SARIF) + jeux de règles par langage + règles maison. Normalisation vers `findings` : rule_id, cwe, owasp, file, start_line, end_line, snippet_hash, raw_severity.
+
+Critères d'acceptation :
+- Findings normalisés (fichier, lignes, règle, CWE)",Highest,8,18,S2,Analyse,analyse
+SS-5.1,SS-5,Sub-task,Adaptateur moteur + parsing SARIF,Rôle : Backend,Highest,,6,S2,Analyse,be
+SS-5.2,SS-5,Sub-task,Normalisation des findings,Rôle : Backend,Highest,,4,S2,Analyse,be
+SS-5.3,SS-5,Sub-task,Premières règles maison,Rôle : Backend,Highest,,4,S2,Analyse,be
+SS-5.4,SS-5,Sub-task,Tests par langage,Rôle : QA,Highest,,4,S2,Analyse,qa
+SS-6,,Story,Détection de secrets,"Détecter clés d'API, mots de passe et jetons commités.
+
+Spécifications techniques :
+Détection par motifs + entropie. Stockage : type, fichier, ligne, empreinte SHA-256 tronquée ; **jamais la valeur**. Affichage masqué (`sk_****`).
+
+Critères d'acceptation :
+- Valeurs jamais stockées en clair
+- affichage masqué
+- emplacement précis",Highest,5,9,S2,Analyse,"analyse,sécurité"
+SS-6.1,SS-6,Sub-task,Intégration d'un détecteur de secrets open source,Rôle : Backend,Highest,,4,S2,Analyse,be
+SS-6.2,SS-6,Sub-task,Masquage et stockage par empreinte,Rôle : Backend,Highest,,3,S2,Analyse,be
+SS-6.3,SS-6,Sub-task,Tests : aucune valeur en base ni en logs,Rôle : QA,Highest,,2,S2,Analyse,qa
+SS-7,,Story,Analyse des dépendances (SCA),"Identifier les bibliothèques avec CVE connues.
+
+Spécifications techniques :
+Parsing requirements.txt / pyproject, package.json + lockfile, composer.json/lock, pom.xml. Croisement avec une base publique d'advisories (API open source). Sortie : package, version, advisory, fixed_version.
+
+Critères d'acceptation :
+- Lecture des manifests (requirements, package.json, composer, pom)
+- version corrigée indiquée",High,5,12,S2,Analyse,analyse
+SS-7.1,SS-7,Sub-task,Parsers de manifests,Rôle : Backend,High,,5,S2,Analyse,be
+SS-7.2,SS-7,Sub-task,Client base d'advisories + cache,Rôle : Backend,High,,4,S2,Analyse,be
+SS-7.3,SS-7,Sub-task,Affichage des dépendances vulnérables,Rôle : Frontend web,High,,3,S2,Analyse,fe
+SS-8,,Task,Jeu de référence de vulnérabilités,"Constituer un benchmark à partir d'applications volontairement vulnérables open source.
+
+Spécifications techniques :
+Corpus d'applications volontairement vulnérables open source + annotations de vérité terrain (fichier, ligne, CWE). Script `benchmark.py` calculant rappel, précision, faux positifs, exécuté en CI nocturne.
+
+Critères d'acceptation :
+- Rappel et faux positifs calculés automatiquement en CI",High,5,14,S2,Analyse,qa
+SS-8.1,SS-8,Sub-task,Sélection du corpus + annotations,Rôle : QA,High,,8,S2,Analyse,qa
+SS-8.2,SS-8,Sub-task,Script de benchmark + rapport,Rôle : QA,High,,4,S2,Analyse,qa
+SS-8.3,SS-8,Sub-task,Job CI nocturne,Rôle : DevOps,High,,2,S2,Analyse,devops
+SS-9,,Story,Validation contextuelle des alertes,"L'IA analyse l'extrait et son contexte pour confirmer ou écarter l'alerte.
+
+Spécifications techniques :
+Pour chaque finding : extraction du contexte (fonction englobante + imports + appels, ≤ 150 lignes). Prompt Claude → JSON {verdict: true_positive|false_positive|uncertain, confidence, reason}. Findings `false_positive` à haute confiance masqués par défaut.
+
+Critères d'acceptation :
+- Sortie JSON structurée
+- faux positifs < 15 % sur le benchmark",Highest,8,18,S3,IA,ia
+SS-9.1,SS-9,Sub-task,Extracteur de contexte (AST par langage),Rôle : Backend,Highest,,8,S3,IA,be
+SS-9.2,SS-9,Sub-task,Prompt de validation + schéma JSON,Rôle : IA / prompts,Highest,,4,S3,IA,ia
+SS-9.3,SS-9,Sub-task,Intégration pipeline + parallélisation,Rôle : Backend,Highest,,3,S3,IA,be
+SS-9.4,SS-9,Sub-task,Mesure faux positifs sur benchmark,Rôle : QA,Highest,,3,S3,IA,qa
+SS-10,,Story,Explication pédagogique de la faille,"En tant que développeur, je comprends la faille, le scénario d'attaque conceptuel et l'impact métier.
+
+Spécifications techniques :
+Prompt pédagogique en français : définition, scénario d'attaque **conceptuel** (sans exploit ni payload fonctionnel), impact métier, niveau de difficulté, références OWASP/CWE. Filtre de sortie bloquant les charges offensives.
+
+Critères d'acceptation :
+- Explication en français
+- aucune charge offensive exploitable
+- référence OWASP/CWE",Highest,5,9,S3,IA,ia
+SS-10.1,SS-10,Sub-task,Prompt d'explication + garde-fous,Rôle : IA / prompts,Highest,,4,S3,IA,ia
+SS-10.2,SS-10,Sub-task,Filtre de sortie,Rôle : Backend,Highest,,2,S3,IA,be
+SS-10.3,SS-10,Sub-task,Relecture de 30 explications,Rôle : QA,Highest,,3,S3,IA,qa
+SS-11,,Story,Proposition de correctif,"En tant que développeur, je vois un diff avant/après avec explication.
+
+Spécifications techniques :
+Prompt correctif → JSON {patched_code, diff, explanation, best_practices[]}. Vérification syntaxique du correctif (parseur du langage). Diff unifié affiché côté front.
+
+Critères d'acceptation :
+- Diff affiché
+- correctif compilable sur 80 % du benchmark
+- bouton copier",Highest,8,16,S3,IA,ia
+SS-11.1,SS-11,Sub-task,Prompt correctif + schéma,Rôle : IA / prompts,Highest,,4,S3,IA,ia
+SS-11.2,SS-11,Sub-task,Vérification syntaxique du patch,Rôle : Backend,Highest,,5,S3,IA,be
+SS-11.3,SS-11,Sub-task,Composant diff avant/après + copier,Rôle : Frontend web,Highest,,4,S3,IA,fe
+SS-11.4,SS-11,Sub-task,Taux de correctifs valides sur benchmark,Rôle : QA,Highest,,3,S3,IA,qa
+SS-12,,Task,Maîtrise des coûts IA,"Envoyer uniquement les extraits pertinents et mettre en cache.
+
+Spécifications techniques :
+Budget de tokens par scan selon l'offre ; regroupement des findings d'un même fichier ; cache par (snippet_hash, rule_id, model_version). Métriques de coût par scan.
+
+Critères d'acceptation :
+- Coût moyen par analyse mesuré et plafonné par offre",High,3,8,S3,IA,"ia,backend"
+SS-12.1,SS-12,Sub-task,Cache par empreinte,Rôle : Backend,High,,3,S3,IA,be
+SS-12.2,SS-12,Sub-task,Budget et plafonds par offre,Rôle : Backend,High,,3,S3,IA,be
+SS-12.3,SS-12,Sub-task,Tableau de coûts,Rôle : Données,High,,2,S3,IA,data
+SS-13,,Story,Classification et sévérité,"Chaque finding a une catégorie OWASP, un CWE et une sévérité.
+
+Spécifications techniques :
+Mapping règle → CWE → catégorie OWASP Top 10. Sévérité = f(raw_severity, verdict IA, exposition). Documentation publique du scoring.
+
+Critères d'acceptation :
+- 4 niveaux de sévérité
+- règles de scoring documentées",High,3,7,S3,Scoring,analyse
+SS-13.1,SS-13,Sub-task,Tables de mapping CWE / OWASP,Rôle : Backend,High,,3,S3,Scoring,be
+SS-13.2,SS-13,Sub-task,Fonction de scoring,Rôle : Backend,High,,2,S3,Scoring,be
+SS-13.3,SS-13,Sub-task,Documentation du scoring,Rôle : Produit,High,,2,S3,Scoring,po
+SS-14,,Story,Vue détaillée d'une faille,"En tant que développeur, je vois le code surligné, l'explication et le correctif.
+
+Spécifications techniques :
+Page `/scans/{id}/findings/{fid}` : code surligné (bibliothèque de coloration), panneaux explication / correctif / références, navigation clavier.
+
+Critères d'acceptation :
+- Coloration syntaxique
+- navigation entre findings",High,5,11,S4,Interface,web
+SS-14.1,SS-14,Sub-task,Vue code avec surlignage des lignes,Rôle : Frontend web,High,,5,S4,Interface,fe
+SS-14.2,SS-14,Sub-task,Panneaux explication et correctif,Rôle : Frontend web,High,,4,S4,Interface,fe
+SS-14.3,SS-14,Sub-task,Navigation entre findings,Rôle : Frontend web,High,,2,S4,Interface,fe
+SS-15,,Story,Tableau de bord projet,"En tant que CTO, je vois le score, la répartition par sévérité et l'évolution.
+
+Spécifications techniques :
+Score projet 0-100 = pénalités pondérées par sévérité. Graphiques (recharts) : répartition sévérité, top catégories OWASP, évolution. Comparaison avec le scan précédent (nouveaux / corrigés).
+
+Critères d'acceptation :
+- Graphiques
+- comparaison avec l'analyse précédente",High,5,13,S4,Interface,web
+SS-15.1,SS-15,Sub-task,Calcul du score + agrégations,Rôle : Backend,High,,4,S4,Interface,be
+SS-15.2,SS-15,Sub-task,Dashboard et graphiques,Rôle : Frontend web,High,,6,S4,Interface,fe
+SS-15.3,SS-15,Sub-task,Diff entre deux scans,Rôle : Backend,High,,3,S4,Interface,be
+SS-16,,Story,Ignorer une alerte avec justification,"En tant que développeur, je marque un faux positif avec un motif.
+
+Spécifications techniques :
+`POST /findings/{id}/dismiss {reason, justification}`. Empreinte stable (rule_id + chemin + snippet normalisé) pour retrouver le finding aux scans suivants.
+
+Critères d'acceptation :
+- Justification obligatoire
+- alerte masquée aux analyses suivantes
+- audit log",Medium,3,7,S4,Interface,"web,backend"
+SS-16.1,SS-16,Sub-task,Empreinte stable + endpoint dismiss,Rôle : Backend,Medium,,4,S4,Interface,be
+SS-16.2,SS-16,Sub-task,Modale de justification,Rôle : Frontend web,Medium,,2,S4,Interface,fe
+SS-16.3,SS-16,Sub-task,Écriture dans l'audit log,Rôle : Backend,Medium,,1,S4,Interface,be
+SS-17,,Story,Connexion GitHub / GitLab,"En tant que développeur, je connecte un dépôt via OAuth et lance une analyse.
+
+Spécifications techniques :
+Applications OAuth GitHub / GitLab (scopes lecture minimale). Jetons chiffrés (AES-GCM, clé en variable d'environnement référencée par nom). Clone shallow dans le conteneur de scan.
+
+Critères d'acceptation :
+- Choix du dépôt et de la branche
+- jetons chiffrés",High,5,14,S4,Intégrations,intégration
+SS-17.1,SS-17,Sub-task,OAuth GitHub + GitLab,Rôle : Backend,High,,6,S4,Intégrations,be
+SS-17.2,SS-17,Sub-task,Stockage chiffré des jetons,Rôle : Backend,High,,2,S4,Intégrations,be
+SS-17.3,SS-17,Sub-task,Sélection dépôt / branche,Rôle : Frontend web,High,,3,S4,Intégrations,fe
+SS-17.4,SS-17,Sub-task,Clone shallow dans la sandbox,Rôle : Backend,High,,3,S4,Intégrations,be
+SS-18,,Story,Export PDF et JSON,"En tant que CTO, j'exporte un rapport pour un audit ou un client.
+
+Spécifications techniques :
+PDF via template HTML + WeasyPrint (logo de l'organisation, résumé, findings par sévérité). JSON conforme à un schéma publié (JSON Schema).
+
+Critères d'acceptation :
+- PDF brandé
+- JSON conforme à un schéma documenté",High,5,10,S4,Rapports,backend
+SS-18.1,SS-18,Sub-task,Template et génération PDF,Rôle : Backend,High,,5,S4,Rapports,be
+SS-18.2,SS-18,Sub-task,Export JSON + schéma,Rôle : Backend,High,,3,S4,Rapports,be
+SS-18.3,SS-18,Sub-task,Bouton d'export + options,Rôle : Frontend web,High,,2,S4,Rapports,fe
+SS-19,,Story,Journal d'audit,"Tracer analyses, ignorés, exports et invitations.
+
+Spécifications techniques :
+Collection `audit_logs` en append-only (org_id, actor, action, target, ts, ip). Consultation filtrable par l'admin.
+
+Critères d'acceptation :
+- Consultable par l'admin
+- non modifiable",Medium,3,6,S4,Traçabilité,"backend,sécurité"
+SS-19.1,SS-19,Sub-task,Middleware d'audit,Rôle : Backend,Medium,,3,S4,Traçabilité,be
+SS-19.2,SS-19,Sub-task,Écran de consultation,Rôle : Frontend web,Medium,,3,S4,Traçabilité,fe
+SS-20,,Story,Offres Free / Pro / Business,"Limites par offre et paiement en ligne.
+
+Spécifications techniques :
+Plans : free (1 projet, 5 scans/mois), pro (par développeur), business (SSO, marque blanche). Paiement via prestataire + webhooks. Dépendance `require_plan()`.
+
+Critères d'acceptation :
+- Quotas appliqués
+- upgrade/downgrade
+- facturation",Medium,5,14,S4,Monétisation,"backend,web"
+SS-20.1,SS-20,Sub-task,"Plans, quotas, gating",Rôle : Backend,Medium,,5,S4,Monétisation,be
+SS-20.2,SS-20,Sub-task,Paiement + webhooks,Rôle : Backend,Medium,,5,S4,Monétisation,be
+SS-20.3,SS-20,Sub-task,Pages tarifs + facturation,Rôle : Frontend web,Medium,,4,S4,Monétisation,fe
+SS-21,,Task,Bêta 10 équipes pilotes,"Onboarding et suivi de 10 équipes.
+
+Spécifications techniques :
+10 équipes pilotes (organisations de test), onboarding guidé, sondage après 2 semaines, mesure du taux de correctifs acceptés.
+
+Critères d'acceptation :
+- Feedback collecté
+- taux de correctifs acceptés mesuré",High,5,10,Bêta,Bêta,produit
+SS-21.1,SS-21,Sub-task,Recrutement et onboarding,Rôle : Produit,High,,6,Bêta,Bêta,po
+SS-21.2,SS-21,Sub-task,Analyse des retours,Rôle : Produit,High,,4,Bêta,Bêta,po
+SS-22,,Epic,Commentaires automatiques sur pull requests,"Commenter les PR avec les nouvelles failles introduites.
+
+Spécifications techniques :
+GitHub App : webhook `pull_request` → scan incrémental sur le diff → commentaires de review sur les lignes concernées.
+
+Critères d'acceptation :
+- Analyse incrémentale sur le diff
+- commentaire par finding",Low,8,16,V2,Intégrations (V2),intégration
+SS-22.1,SS-22,Sub-task,GitHub App + webhooks,Rôle : Backend,Low,,8,V2,Intégrations (V2),be
+SS-22.2,SS-22,Sub-task,Scan incrémental sur diff,Rôle : Backend,Low,,8,V2,Intégrations (V2),be
+SS-23,,Epic,Job CI/CD bloquant,"Bloquer un pipeline au-delà d'un seuil de sévérité.
+
+Spécifications techniques :
+CLI `secuscan` + fichier `.secuscan.yml` (seuil, exclusions). Code retour ≠ 0 si seuil dépassé.
+
+Critères d'acceptation :
+- Configuration par fichier
+- code retour documenté",Low,5,8,V2,Intégrations (V2),devops
+SS-23.1,SS-23,Sub-task,CLI + configuration,Rôle : Backend,Low,,6,V2,Intégrations (V2),be
+SS-23.2,SS-23,Sub-task,Documentation d'intégration CI,Rôle : Produit,Low,,2,V2,Intégrations (V2),po
+SS-24,,Epic,Mode formation code sécurisé,"Exercices de code vulnérable à corriger avec correction IA.
+
+Spécifications techniques :
+Catalogue d'exercices (code vulnérable + tests), correction IA, progression par apprenant.
+
+Critères d'acceptation :
+- 10 exercices
+- suivi de progression",Low,8,14,V2,Formation (V2),formation
+SS-24.1,SS-24,Sub-task,Conception de 10 exercices,Rôle : Produit,Low,,8,V2,Formation (V2),po
+SS-24.2,SS-24,Sub-task,Interface d'exercice,Rôle : Frontend web,Low,,6,V2,Formation (V2),fe

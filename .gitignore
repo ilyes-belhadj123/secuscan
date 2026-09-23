@@ -1,0 +1,28 @@
+# Environnement
+.env
+.env.*
+!.env.example
+
+# Python
+__pycache__/
+*.pyc
+.venv/
+.pytest_cache/
+.ruff_cache/
+
+# Node
+node_modules/
+dist/
+
+# Données locales SecuScan (base, uploads temporaires)
+apps/api/data/
+
+# Éditeurs / OS
+.vscode/
+.idea/
+Thumbs.db
+.DS_Store
+~$*
+
+# Build TypeScript
+*.tsbuildinfo

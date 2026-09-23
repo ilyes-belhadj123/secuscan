@@ -1,0 +1,13 @@
+{
+  "name": "acme-shop-frontend",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Acme Shop - front boutique (démonstration volontairement vulnérable)",
+  "main": "server.js",
+  "dependencies": {
+    "express": "4.17.1",
+    "jsonwebtoken": "8.5.1",
+    "lodash": "4.17.15",
+    "axios": "0.21.0"
+  }
+}

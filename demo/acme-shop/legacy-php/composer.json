@@ -1,0 +1,8 @@
+{
+    "name": "acme/legacy-backoffice",
+    "description": "Acme Shop - ancien back-office (démonstration)",
+    "require": {
+        "guzzlehttp/guzzle": "7.4.0",
+        "twig/twig": "2.14.0"
+    }
+}
