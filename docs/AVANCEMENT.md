@@ -8,9 +8,9 @@ Légende : ✅ fait · 🟡 partiel (voir « reste à faire ») · ⬜ à faire 
 
 | | Tickets |
 |---|---|
-| ✅ Fait | 15 |
+| ✅ Fait | 16 |
 | 🟡 Partiel | 2 |
-| ⬜ À faire | 7 |
+| ⬜ À faire | 6 |
 
 ## Qualité de détection (benchmark SS-8)
 
@@ -43,7 +43,7 @@ volontairement vulnérable « Acme Shop » (4 langages).
 | Ticket | Titre | Statut | Réalisé | Reste à faire |
 |---|---|---|---|---|
 | SS-1 | Initialiser repos, CI et workers | 🟡 | Monorepo `apps/api` + `apps/web`, CI GitHub Actions (lint, tests, build) | Workers ARQ + Redis, images Docker (tâches en thread pour la démo) |
-| SS-2 | Comptes et organisations | ⬜ | — | Organisations, rôles, invitations, isolation multi-tenant |
+| SS-2 | Comptes et organisations | ✅ | Inscription / connexion (scrypt, session en cookie HttpOnly, jetons stockés par empreinte, limitation des tentatives, protection CSRF), organisations, rôles propriétaire / admin / membre, invitations par lien à usage unique liées à l'e-mail, changement d'organisation ; **isolation multi-tenant testée** (analyses, alertes, rapports, coûts, audit, alertes ignorées) | Envoi des invitations par e-mail (SMTP), SSO (offre Business) |
 | SS-3 | Upload ZIP et collage de code | ✅ | Limite 100 Mo, protection zip-slip / zip-bomb, détection des langages, suppression après analyse | Chiffrement du stockage temporaire |
 | SS-4 | Sandbox d'analyse éphémère | ⬜ | Le code analysé n'est jamais exécuté | Conteneur par scan sans réseau (Docker absent du poste de démo) |
 
@@ -75,7 +75,7 @@ volontairement vulnérable « Acme Shop » (4 langages).
 | SS-16 | Ignorer une alerte avec justification | ✅ | Justification obligatoire, empreinte stable entre analyses, audit | — |
 | SS-17 | Connexion GitHub / GitLab | 🟡 | Analyse d'un dépôt **public** par URL (clone superficiel sécurisé) | OAuth, dépôts privés, jetons chiffrés, choix de branche via liste |
 | SS-18 | Export PDF et JSON | ✅ | PDF (marque blanche : client / société), JSON + schéma publié | Logo de l'organisation |
-| SS-19 | Journal d'audit | ✅ | Ajout seul, écran filtrable (analyses, alertes ignorées, exports) | Restreindre à l'admin (dépend de SS-2) |
+| SS-19 | Journal d'audit | ✅ | Ajout seul, par organisation, réservé aux administrateurs, auteur de chaque action ; analyses, alertes ignorées, exports, membres (invitation, arrivée, rôle, départ) | — |
 | SS-20 | Offres Free / Pro / Business | ⬜ | — | Plans, quotas, paiement |
 
 ## Bêta et V2
@@ -89,15 +89,17 @@ volontairement vulnérable « Acme Shop » (4 langages).
 
 ## Prochaines étapes
 
-1. SS-2 — comptes et organisations (prérequis de l'hébergement en ligne et des offres SS-20).
-2. SS-5 — brancher un moteur SAST open source en complément des règles maison.
-3. SS-17 — OAuth GitHub / GitLab pour les dépôts privés.
+1. SS-20 — offres Free / Pro / Business : quotas par organisation (le budget IA existe déjà par offre).
+2. SS-17 — OAuth GitHub / GitLab pour les dépôts privés.
+3. SS-5 — brancher un moteur SAST open source en complément des règles maison.
+4. Mise en ligne (hébergement HTTPS) : désormais possible grâce aux comptes.
 
 ## Historique
 
 | Date | Commit | Contenu |
 |---|---|---|
-| 23/09/2026 | (ce commit) | SS-10 relecture de 30 explications IA, prompt v2 (environnement d'exécution, rien d'inventé, CWE précis), extraits sans accolade du bloc parent |
+| 23/09/2026 | (ce commit) | SS-2 comptes, organisations, rôles, invitations, isolation multi-tenant ; SS-19 audit réservé aux admins ; interrupteur `SECUSCAN_AI_DISABLED` |
+| 23/09/2026 | `312720e` | SS-10 relecture de 30 explications IA, prompt v2 (environnement d'exécution, rien d'inventé, CWE précis), extraits sans accolade du bloc parent |
 | 23/09/2026 | `746bdce` | SS-11 vérification syntaxique des correctifs dans les 4 langages (89/89 valides) |
 | 23/09/2026 | `783b6ed` | SS-12 coûts IA : budget par offre, priorisation, dépendances sans IA, page « Coûts IA » ; robustesse aux réponses vides / tronquées. Vrai projet NodeGoat avec IA : 25 failles logiques trouvées pour 0,97 $ |
 | 23/09/2026 | `5842133` | IA réelle validée : benchmark règles + IA (100 % / 7 %), contexte IA enrichi des constantes du module, script `configure-ia.ps1` |

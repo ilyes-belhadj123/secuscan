@@ -117,6 +117,9 @@ label.field { display: flex; flex-direction: column; gap: 4px; font-weight: 600;
 .badge.verdict-false_positive { border-color: color-mix(in srgb, var(--good) 50%, transparent); color: var(--good-text); }
 .tag { font-size: 12px; color: var(--text-2); background: var(--surface-2); padding: 2px 8px; border-radius: 6px; }
 
+/* ---------- authentification */
+.auth-card { max-width: 440px; margin: 48px auto; }
+
 /* ---------- accueil */
 .hero { padding: 24px 0 8px; }
 .hero p { font-size: 16px; color: var(--text-2); max-width: 720px; margin: 8px 0 0; }

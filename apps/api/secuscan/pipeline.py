@@ -57,8 +57,11 @@ class ScanService:
     ) -> None:
         """Lance l'analyse en tâche de fond. `prepare` = (libellé, étape préalable), ex. clonage Git."""
         self.storage.save_scan(scan)
-        self.storage.audit("scan.created", scan.id, {"project": scan.project_name, "source": scan.source})
+        self._audit(scan, "scan.created", {"project": scan.project_name, "source": scan.source})
         self.executor.submit(self._run_safely, scan, root, workspace, prepare)
+
+    def _audit(self, scan: Scan, action: str, details: dict) -> None:
+        self.storage.audit(action, scan.id, details, org_id=scan.org_id or "", actor=scan.created_by or "")
 
     def _run_safely(self, scan: Scan, root: Path, workspace: Workspace | None, prepare=None) -> None:
         try:
@@ -72,7 +75,7 @@ class ScanService:
             log.exception("Analyse %s échouée", scan.id)
             scan.status, scan.error, scan.stage = "failed", str(exc), "Échec"
             self.storage.save_scan(scan)
-            self.storage.audit("scan.failed", scan.id, {"project": scan.project_name, "error": str(exc)[:300]})
+            self._audit(scan, "scan.failed", {"project": scan.project_name, "error": str(exc)[:300]})
         finally:
             if workspace:
                 workspace.cleanup()  # le code importé est supprimé après analyse
@@ -118,10 +121,8 @@ class ScanService:
         self.storage.save_findings(findings)
         scan.status, scan.stage, scan.progress, scan.completed_at = "completed", "Terminée", 1.0, now_iso()
         self.storage.save_scan(scan)
-        self.storage.audit(
-            "scan.completed", scan.id,
-            {"project": scan.project_name, "findings": scan.summary.total, "score": scan.score},
-        )
+        self._audit(scan, "scan.completed",
+                    {"project": scan.project_name, "findings": scan.summary.total, "score": scan.score})
         return findings
 
     def _secrets(self, scan: Scan, codebase: CodeBase):
@@ -225,7 +226,7 @@ class ScanService:
         return findings
 
     def _apply_dismissals(self, scan: Scan, findings: list[Finding]) -> list[Finding]:
-        dismissed = self.storage.dismissals_for(scan.project_name)
+        dismissed = self.storage.dismissals_for(scan.project_name, org_id=scan.org_id or "")
         for f in findings:
             if f.fingerprint in dismissed:
                 f.status = "dismissed"
@@ -366,7 +367,7 @@ class ScanService:
         s.plan = self.settings.secuscan_plan
 
     def _compare_with_previous(self, scan: Scan, findings: list[Finding]) -> None:
-        previous = self.storage.previous_completed_scan(scan.project_name, scan.created_at)
+        previous = self.storage.previous_completed_scan(scan.project_name, scan.created_at, org_id=scan.org_id or "")
         if not previous:
             return
         before = {f.fingerprint for f in self.storage.list_findings(previous.id) if f.status == "open"}

@@ -133,6 +133,9 @@ class ScanSummary(BaseModel):
 class Scan(BaseModel):
     id: str
     project_name: str
+    # Organisation propriétaire (vide : outils internes, invisible des utilisateurs)
+    org_id: str | None = None
+    created_by: str | None = None
     source: Literal["upload", "snippet", "demo", "git"]
     source_url: str | None = None
     status: ScanStatus = "queued"

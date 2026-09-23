@@ -1,12 +1,19 @@
-"""API HTTP SecuScan (démo)."""
+"""API HTTP SecuScan.
+
+Toutes les routes métier exigent une session (SS-2) et sont filtrées par l'organisation courante :
+une analyse, une alerte ou un rapport d'une autre organisation répond « introuvable » (404),
+sans révéler son existence.
+"""
 import logging
 import re
 from pathlib import Path
 
-from fastapi import Depends, FastAPI, File, Form, HTTPException, Query, UploadFile
+from fastapi import Depends, FastAPI, File, Form, HTTPException, Query, Request, UploadFile
 from fastapi.responses import JSONResponse, Response
 
+from .accounts import router as accounts_router
 from .config import DEMO_PROJECT_DIR, Settings, get_settings
+from .deps import Context, current_context, get_service, require_admin
 from .ingest import (
     UploadError,
     Workspace,
@@ -18,28 +25,50 @@ from .ingest import (
 from .models import SEVERITY_ORDER, DismissRequest, Finding, GitRequest, Scan, SnippetRequest
 from .pipeline import ScanService, new_id
 from .reports import build_json, build_pdf, report_json_schema
-from .storage import Storage
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s: %(message)s")
 
-app = FastAPI(title="SecuScan API", version="0.1.0")
+app = FastAPI(title="SecuScan API", version="0.2.0")
+app.include_router(accounts_router)
 
-_service: ScanService | None = None
-
-
-def get_service() -> ScanService:
-    global _service
-    if _service is None:
-        settings = get_settings()
-        _service = ScanService(settings, Storage(settings.data_dir / "secuscan.db"))
-    return _service
+_UNSAFE_METHODS = {"POST", "PUT", "PATCH", "DELETE"}
 
 
-def _scan_or_404(service: ScanService, scan_id: str) -> Scan:
-    scan = service.storage.get_scan(scan_id)
+@app.middleware("http")
+async def csrf_origin_check(request: Request, call_next):
+    """Protection CSRF : une requête qui modifie des données doit venir d'une origine autorisée.
+
+    Complète le cookie de session SameSite=Lax (non envoyé sur les POST inter-sites).
+    """
+    if request.method in _UNSAFE_METHODS:
+        origin = request.headers.get("origin")
+        allowed = get_settings().secuscan_allowed_origins
+        if (origin and origin not in allowed) or (not origin and request.headers.get("sec-fetch-site") == "cross-site"):
+            return JSONResponse({"detail": "Origine de la requête non autorisée"}, status_code=403)
+    return await call_next(request)
+
+
+def _scan_or_404(service: ScanService, scan_id: str, ctx: Context) -> Scan:
+    scan = service.storage.get_scan(scan_id, org_id=ctx.org_id)
     if not scan:
         raise HTTPException(404, "Analyse introuvable")
     return scan
+
+
+def _finding_or_404(service: ScanService, finding_id: str, ctx: Context) -> tuple[Finding, Scan]:
+    finding = service.storage.get_finding(finding_id)
+    scan = service.storage.get_scan(finding.scan_id, org_id=ctx.org_id) if finding else None
+    if not (finding and scan):
+        raise HTTPException(404, "Alerte introuvable")
+    return finding, scan
+
+
+def _new_scan(ctx: Context, **fields) -> Scan:
+    return Scan(id=new_id(), org_id=ctx.org_id, created_by=ctx.email, **fields)
+
+
+def _audit(service: ScanService, ctx: Context, action: str, target: str, details: dict) -> None:
+    service.storage.audit(action, target, details, org_id=ctx.org_id, actor=ctx.email)
 
 
 def _safe_filename(name: str) -> str:
@@ -50,7 +79,7 @@ def _sort_key(f: Finding):
     return (f.status != "open", SEVERITY_ORDER[f.severity], f.file, f.start_line)
 
 
-# ---------------------------------------------------------------------- santé
+# ---------------------------------------------------------------------- santé (public)
 @app.get("/api/health")
 def health(settings: Settings = Depends(get_settings)):
     return {
@@ -64,10 +93,10 @@ def health(settings: Settings = Depends(get_settings)):
 
 # ---------------------------------------------------------------------- lancement d'analyses
 @app.post("/api/scans/demo", status_code=202)
-def scan_demo(service: ScanService = Depends(get_service)):
+def scan_demo(ctx: Context = Depends(current_context), service: ScanService = Depends(get_service)):
     if not DEMO_PROJECT_DIR.is_dir():
         raise HTTPException(404, "Projet de démonstration absent")
-    scan = Scan(id=new_id(), project_name="Acme Shop (démo)", source="demo")
+    scan = _new_scan(ctx, project_name="Acme Shop (démo)", source="demo")
     service.submit(scan, DEMO_PROJECT_DIR)
     return scan
 
@@ -76,6 +105,7 @@ def scan_demo(service: ScanService = Depends(get_service)):
 async def scan_upload(
     file: UploadFile = File(...),
     project_name: str = Form("Projet importé", max_length=120),
+    ctx: Context = Depends(current_context),
     service: ScanService = Depends(get_service),
 ):
     settings = service.settings
@@ -101,13 +131,13 @@ async def scan_upload(
     except Exception:
         workspace.cleanup()
         raise
-    scan = Scan(id=new_id(), project_name=project_name.strip() or "Projet importé", source="upload")
+    scan = _new_scan(ctx, project_name=project_name.strip() or "Projet importé", source="upload")
     service.submit(scan, source_dir, workspace)
     return scan
 
 
 @app.post("/api/scans/git", status_code=202)
-def scan_git(body: GitRequest, service: ScanService = Depends(get_service)):
+def scan_git(body: GitRequest, ctx: Context = Depends(current_context), service: ScanService = Depends(get_service)):
     try:
         url = validate_git_url(body.url, body.branch)
     except UploadError as exc:
@@ -116,8 +146,8 @@ def scan_git(body: GitRequest, service: ScanService = Depends(get_service)):
     repo_name = url.removesuffix(".git").split("/")[-1]
     workspace = Workspace(service.settings.data_dir / "work")
     source_dir = workspace.path / "src"
-    scan = Scan(
-        id=new_id(), project_name=(body.project_name or "").strip() or repo_name, source="git",
+    scan = _new_scan(
+        ctx, project_name=(body.project_name or "").strip() or repo_name, source="git",
         source_url=url + (f"@{branch}" if branch else ""),
     )
     service.submit(
@@ -128,7 +158,7 @@ def scan_git(body: GitRequest, service: ScanService = Depends(get_service)):
 
 
 @app.post("/api/scans/snippet", status_code=202)
-def scan_snippet(body: SnippetRequest, service: ScanService = Depends(get_service)):
+def scan_snippet(body: SnippetRequest, ctx: Context = Depends(current_context), service: ScanService = Depends(get_service)):
     filename = Path(body.filename.replace("\\", "/")).name
     if not language_for_filename(filename):
         raise HTTPException(400, "Extension non supportée (.py, .js, .ts, .php, .java…).")
@@ -136,27 +166,30 @@ def scan_snippet(body: SnippetRequest, service: ScanService = Depends(get_servic
         raise HTTPException(400, "Le code est vide.")
     workspace = Workspace(service.settings.data_dir / "work")
     (workspace.path / filename).write_text(body.code, encoding="utf-8")
-    scan = Scan(id=new_id(), project_name=body.project_name.strip() or "Extrait de code", source="snippet")
+    scan = _new_scan(ctx, project_name=body.project_name.strip() or "Extrait de code", source="snippet")
     service.submit(scan, workspace.path, workspace)
     return scan
 
 
 # ---------------------------------------------------------------------- consultation
 @app.get("/api/scans")
-def list_scans(service: ScanService = Depends(get_service)):
-    return service.storage.list_scans()
+def list_scans(ctx: Context = Depends(current_context), service: ScanService = Depends(get_service)):
+    return service.storage.list_scans(org_id=ctx.org_id)
 
 
 @app.get("/api/scans/{scan_id}")
-def get_scan(scan_id: str, service: ScanService = Depends(get_service)):
-    return _scan_or_404(service, scan_id)
+def get_scan(scan_id: str, ctx: Context = Depends(current_context), service: ScanService = Depends(get_service)):
+    return _scan_or_404(service, scan_id, ctx)
 
 
 @app.get("/api/scans/{scan_id}/history")
-def scan_history(scan_id: str, service: ScanService = Depends(get_service)):
+def scan_history(scan_id: str, ctx: Context = Depends(current_context), service: ScanService = Depends(get_service)):
     """Évolution du score pour le projet de cette analyse."""
-    scan = _scan_or_404(service, scan_id)
-    scans = [s for s in service.storage.list_scans() if s.project_name == scan.project_name and s.status == "completed"]
+    scan = _scan_or_404(service, scan_id, ctx)
+    scans = [
+        s for s in service.storage.list_scans(org_id=ctx.org_id)
+        if s.project_name == scan.project_name and s.status == "completed"
+    ]
     return [
         {"id": s.id, "created_at": s.created_at, "score": s.score, "total": s.summary.total,
          "by_severity": s.summary.by_severity}
@@ -165,31 +198,28 @@ def scan_history(scan_id: str, service: ScanService = Depends(get_service)):
 
 
 @app.get("/api/scans/{scan_id}/findings")
-def list_findings(scan_id: str, service: ScanService = Depends(get_service)):
-    _scan_or_404(service, scan_id)
+def list_findings(scan_id: str, ctx: Context = Depends(current_context), service: ScanService = Depends(get_service)):
+    _scan_or_404(service, scan_id, ctx)
     return sorted(service.storage.list_findings(scan_id), key=_sort_key)
 
 
 @app.get("/api/findings/{finding_id}")
-def get_finding(finding_id: str, service: ScanService = Depends(get_service)):
-    finding = service.storage.get_finding(finding_id)
-    if not finding:
-        raise HTTPException(404, "Alerte introuvable")
-    return finding
+def get_finding(finding_id: str, ctx: Context = Depends(current_context), service: ScanService = Depends(get_service)):
+    return _finding_or_404(service, finding_id, ctx)[0]
 
 
 @app.post("/api/findings/{finding_id}/dismiss")
-def dismiss_finding(finding_id: str, body: DismissRequest, service: ScanService = Depends(get_service)):
-    finding = service.storage.get_finding(finding_id)
-    if not finding:
-        raise HTTPException(404, "Alerte introuvable")
-    scan = _scan_or_404(service, finding.scan_id)
+def dismiss_finding(finding_id: str, body: DismissRequest, ctx: Context = Depends(current_context),
+                    service: ScanService = Depends(get_service)):
+    finding, scan = _finding_or_404(service, finding_id, ctx)
     finding.status = "dismissed"
     finding.dismiss_reason, finding.dismiss_justification = body.reason, body.justification.strip()
     service.storage.save_findings([finding])
-    service.storage.save_dismissal(scan.project_name, finding.fingerprint, body.reason, finding.dismiss_justification)
+    service.storage.save_dismissal(
+        scan.project_name, finding.fingerprint, body.reason, finding.dismiss_justification, org_id=ctx.org_id
+    )
     service.refresh_scan(scan)
-    service.storage.audit("finding.dismissed", finding.id, {
+    _audit(service, ctx, "finding.dismissed", finding.id, {
         "project": scan.project_name, "title": finding.title, "location": f"{finding.file}:{finding.start_line}",
         "reason": body.reason, "justification": finding.dismiss_justification,
     })
@@ -197,11 +227,11 @@ def dismiss_finding(finding_id: str, body: DismissRequest, service: ScanService 
 
 
 @app.get("/api/costs")
-def ai_costs(service: ScanService = Depends(get_service)):
-    """Coût IA par analyse (SS-12) : appels, cache, jetons et estimation en dollars."""
+def ai_costs(ctx: Context = Depends(current_context), service: ScanService = Depends(get_service)):
+    """Coût IA par analyse de l'organisation (SS-12) : appels, cache, jetons et estimation en dollars."""
     settings = service.settings
     max_calls, max_tokens = settings.ai_budget
-    scans = [s for s in service.storage.list_scans() if s.status == "completed"]
+    scans = [s for s in service.storage.list_scans(org_id=ctx.org_id) if s.status == "completed"]
     rows = [
         {"id": s.id, "project_name": s.project_name, "created_at": s.created_at, "plan": s.summary.plan,
          "calls": s.summary.ai_calls, "cache_hits": s.summary.ai_cache_hits, "tokens": s.summary.ai_tokens,
@@ -220,8 +250,9 @@ def ai_costs(service: ScanService = Depends(get_service)):
 
 
 @app.get("/api/audit")
-def audit_log(service: ScanService = Depends(get_service)):
-    return service.storage.list_audit()
+def audit_log(ctx: Context = Depends(require_admin), service: ScanService = Depends(get_service)):
+    """Journal d'audit de l'organisation, réservé aux administrateurs (SS-19)."""
+    return service.storage.list_audit(ctx.org_id)
 
 
 # ---------------------------------------------------------------------- rapports
@@ -230,28 +261,27 @@ def report_pdf(
     scan_id: str,
     prepared_for: str | None = Query(None, max_length=120),
     prepared_by: str | None = Query(None, max_length=120),
+    ctx: Context = Depends(current_context),
     service: ScanService = Depends(get_service),
 ):
-    scan = _scan_or_404(service, scan_id)
+    scan = _scan_or_404(service, scan_id, ctx)
     if scan.status != "completed":
         raise HTTPException(409, "L'analyse n'est pas terminée")
     prepared_for = (prepared_for or "").strip() or None
     prepared_by = (prepared_by or "").strip() or None
     pdf = build_pdf(scan, service.storage.list_findings(scan_id), prepared_for, prepared_by)
-    service.storage.audit(
-        "report.exported", scan_id,
-        {"format": "pdf", "project": scan.project_name, "prepared_for": prepared_for, "prepared_by": prepared_by},
-    )
+    _audit(service, ctx, "report.exported", scan_id,
+           {"format": "pdf", "project": scan.project_name, "prepared_for": prepared_for, "prepared_by": prepared_by})
     name = _safe_filename(f"secuscan-{scan.project_name}-{scan.id}") + ".pdf"
     return Response(pdf, media_type="application/pdf", headers={"Content-Disposition": f'attachment; filename="{name}"'})
 
 
 @app.get("/api/scans/{scan_id}/report.json")
-def report_json(scan_id: str, service: ScanService = Depends(get_service)):
-    scan = _scan_or_404(service, scan_id)
+def report_json(scan_id: str, ctx: Context = Depends(current_context), service: ScanService = Depends(get_service)):
+    scan = _scan_or_404(service, scan_id, ctx)
     if scan.status != "completed":
         raise HTTPException(409, "L'analyse n'est pas terminée")
-    service.storage.audit("report.exported", scan_id, {"format": "json", "project": scan.project_name})
+    _audit(service, ctx, "report.exported", scan_id, {"format": "json", "project": scan.project_name})
     name = _safe_filename(f"secuscan-{scan.project_name}-{scan.id}") + ".json"
     return JSONResponse(
         build_json(scan, service.storage.list_findings(scan_id)),

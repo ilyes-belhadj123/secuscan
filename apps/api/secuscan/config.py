@@ -29,10 +29,20 @@ class Settings(BaseSettings):
 
     secuscan_data_dir: Path = API_ROOT / "data"
     secuscan_ai_concurrency: int = 6
+    # Coupe l'IA même si une clé est configurée (tests, démonstrations sans coût)
+    secuscan_ai_disabled: bool = False
     secuscan_offline: bool = False
     # Revue logique IA : fichiers de code analysés en entier (coût maîtrisé)
     secuscan_logic_max_files: int = 40
     secuscan_logic_max_lines: int = 400
+
+    # Comptes et sessions (SS-2)
+    # Adresse publique de l'interface (liens d'invitation)
+    secuscan_public_url: str = "http://127.0.0.1:5173"
+    # Cookie de session réservé au HTTPS : à activer dès que l'application est servie en HTTPS
+    secuscan_cookie_secure: bool = False
+    # Origines autorisées pour les requêtes qui modifient des données (protection CSRF)
+    secuscan_allowed_origins: list[str] = ["http://127.0.0.1:5173", "http://localhost:5173"]
 
     # Maîtrise des coûts IA (SS-12)
     secuscan_plan: str = "pro"
@@ -58,7 +68,7 @@ class Settings(BaseSettings):
 
     @property
     def ai_enabled(self) -> bool:
-        return bool(self.openrouter_api_key)
+        return bool(self.openrouter_api_key) and not self.secuscan_ai_disabled
 
     @property
     def data_dir(self) -> Path:

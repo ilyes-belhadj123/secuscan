@@ -127,7 +127,8 @@ export interface AuditEntry {
   ts: string;
   action: string;
   target: string;
-  details: Record<string, string | number | null>;
+  actor: string;
+  details: Record<string, string | number | boolean | null>;
 }
 
 export interface CostRow {
@@ -161,8 +162,45 @@ export interface Health {
   demo_available: boolean;
 }
 
+export interface Me {
+  user: { id: string; email: string; name: string };
+  org: { id: string; name: string; role: Role; role_label: string };
+  organizations: { org_id: string; name: string; role: Role }[];
+}
+
+export type Role = "owner" | "admin" | "member";
+
+export interface OrgDetails {
+  id: string;
+  name: string;
+  role: Role;
+  members: { id: string; email: string; name: string; role: Role; joined_at: string }[];
+  invitations: { id: string; email: string; role: Role; expires_at: number; created_at: string }[];
+}
+
+export interface InvitationPreview {
+  org_name: string;
+  email: string;
+  role: Role;
+  role_label: string;
+  has_account: boolean;
+}
+
+export class ApiError extends Error {
+  constructor(message: string, public status: number) {
+    super(message);
+  }
+}
+
+/** Appelé quand la session expire : l'application renvoie vers la connexion. */
+let onUnauthorized: () => void = () => {};
+export function setUnauthorizedHandler(handler: () => void) {
+  onUnauthorized = handler;
+}
+
 async function request<T>(url: string, init?: RequestInit): Promise<T> {
-  const resp = await fetch(url, init);
+  const resp = await fetch(url, { credentials: "same-origin", ...init });
+  if (resp.status === 401 && !url.startsWith("/api/auth/")) onUnauthorized();
   if (!resp.ok) {
     let detail = `Erreur ${resp.status}`;
     try {
@@ -172,10 +210,16 @@ async function request<T>(url: string, init?: RequestInit): Promise<T> {
     } catch {
       /* réponse non JSON */
     }
-    throw new Error(detail);
+    throw new ApiError(detail, resp.status);
   }
   return resp.json() as Promise<T>;
 }
+
+const send = (method: string, body?: unknown): RequestInit => ({
+  method,
+  headers: body === undefined ? undefined : { "Content-Type": "application/json" },
+  body: body === undefined ? undefined : JSON.stringify(body),
+});
 
 const json = (body: unknown): RequestInit => ({
   method: "POST",
@@ -185,6 +229,21 @@ const json = (body: unknown): RequestInit => ({
 
 export const api = {
   health: () => request<Health>("/api/health"),
+  // Comptes et organisation (SS-2)
+  me: () => request<Me>("/api/auth/me"),
+  login: (email: string, password: string) => request("/api/auth/login", send("POST", { email, password })),
+  register: (body: { name: string; email: string; password: string; org_name?: string; invitation_token?: string }) =>
+    request("/api/auth/register", send("POST", body)),
+  logout: () => request("/api/auth/logout", send("POST")),
+  switchOrg: (org_id: string) => request("/api/auth/switch-org", send("POST", { org_id })),
+  org: () => request<OrgDetails>("/api/org"),
+  invite: (email: string, role: Role) =>
+    request<{ url: string; email: string }>("/api/org/invitations", send("POST", { email, role })),
+  revokeInvitation: (id: string) => request(`/api/org/invitations/${id}`, send("DELETE")),
+  changeRole: (userId: string, role: Role) => request(`/api/org/members/${userId}`, send("PATCH", { role })),
+  removeMember: (userId: string) => request(`/api/org/members/${userId}`, send("DELETE")),
+  invitation: (token: string) => request<InvitationPreview>(`/api/invitations/${token}`),
+  acceptInvitation: (token: string) => request(`/api/invitations/${token}/accept`, send("POST")),
   scans: () => request<Scan[]>("/api/scans"),
   scan: (id: string) => request<Scan>(`/api/scans/${id}`),
   history: (id: string) => request<HistoryPoint[]>(`/api/scans/${id}/history`),

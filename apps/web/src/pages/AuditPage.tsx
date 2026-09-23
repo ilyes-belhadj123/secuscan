@@ -9,7 +9,14 @@ const ACTIONS: Record<string, { label: string; icon: string }> = {
   "scan.failed": { label: "Analyse en échec", icon: "✕" },
   "finding.dismissed": { label: "Alerte ignorée", icon: "⊘" },
   "report.exported": { label: "Rapport exporté", icon: "⤓" },
+  "member.invited": { label: "Membre invité", icon: "✉" },
+  "member.joined": { label: "Membre arrivé", icon: "+" },
+  "member.role_changed": { label: "Rôle modifié", icon: "⇄" },
+  "member.removed": { label: "Membre retiré", icon: "−" },
+  "member.invitation_revoked": { label: "Invitation révoquée", icon: "⊘" },
 };
+
+const ROLES: Record<string, string> = { owner: "propriétaire", admin: "administrateur", member: "membre" };
 
 const SOURCES: Record<string, string> = { demo: "projet de démo", upload: "archive ZIP", snippet: "extrait collé", git: "dépôt Git" };
 const REASONS: Record<string, string> = {
@@ -33,6 +40,16 @@ function describe(e: AuditEntry): string {
       const extra = [d.prepared_for && `pour ${d.prepared_for}`, d.prepared_by && `par ${d.prepared_by}`].filter(Boolean);
       return `Format ${String(d.format).toUpperCase()}${extra.length ? ` · ${extra.join(" · ")}` : ""}`;
     }
+    case "member.invited":
+      return `${d.email} · ${ROLES[String(d.role)] ?? d.role}`;
+    case "member.joined":
+      return `${d.email} · ${ROLES[String(d.role)] ?? d.role} (${d.via})`;
+    case "member.role_changed":
+      return `${ROLES[String(d.from)] ?? d.from} → ${ROLES[String(d.to)] ?? d.to}`;
+    case "member.removed":
+      return d.self ? "Départ volontaire" : "Retiré par un administrateur";
+    case "member.invitation_revoked":
+      return "";
     default:
       return JSON.stringify(d);
   }
@@ -80,6 +97,7 @@ export default function AuditPage() {
                 <th style={{ width: 170 }}>Date</th>
                 <th style={{ width: 190 }}>Action</th>
                 <th style={{ width: 200 }}>Projet</th>
+                <th style={{ width: 190 }}>Par</th>
                 <th>Détail</th>
               </tr>
             </thead>
@@ -100,6 +118,7 @@ export default function AuditPage() {
                         String(e.details.project ?? "—")
                       )}
                     </td>
+                    <td className="small secondary">{e.actor || "—"}</td>
                     <td className="small">{describe(e)}</td>
                   </tr>
                 );
