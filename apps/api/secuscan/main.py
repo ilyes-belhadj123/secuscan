@@ -12,6 +12,8 @@ from fastapi import Depends, FastAPI, File, Form, HTTPException, Query, Request,
 from fastapi.responses import JSONResponse, Response
 
 from .accounts import router as accounts_router
+from .billing import check_scan_quota
+from .billing import router as billing_router
 from .config import DEMO_PROJECT_DIR, Settings, get_settings
 from .deps import Context, current_context, get_service, require_admin
 from .ingest import (
@@ -24,12 +26,14 @@ from .ingest import (
 )
 from .models import SEVERITY_ORDER, DismissRequest, Finding, GitRequest, Scan, SnippetRequest
 from .pipeline import ScanService, new_id
+from .plans import QuotaExceeded, has_feature
 from .reports import build_json, build_pdf, report_json_schema
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s: %(message)s")
 
 app = FastAPI(title="SecuScan API", version="0.2.0")
 app.include_router(accounts_router)
+app.include_router(billing_router)
 
 _UNSAFE_METHODS = {"POST", "PUT", "PATCH", "DELETE"}
 
@@ -63,8 +67,14 @@ def _finding_or_404(service: ScanService, finding_id: str, ctx: Context) -> tupl
     return finding, scan
 
 
-def _new_scan(ctx: Context, **fields) -> Scan:
-    return Scan(id=new_id(), org_id=ctx.org_id, created_by=ctx.email, **fields)
+def _new_scan(service: ScanService, ctx: Context, **fields) -> Scan:
+    """Crée une analyse après vérification des quotas de l'offre (402 si la limite est atteinte)."""
+    try:
+        check_scan_quota(service.storage, ctx.org_id, fields["project_name"])
+    except QuotaExceeded as exc:
+        raise HTTPException(402, str(exc)) from exc
+    org = service.storage.get_org(ctx.org_id)
+    return Scan(id=new_id(), org_id=ctx.org_id, created_by=ctx.email, plan=org["plan"] if org else None, **fields)
 
 
 def _audit(service: ScanService, ctx: Context, action: str, target: str, details: dict) -> None:
@@ -96,7 +106,7 @@ def health(settings: Settings = Depends(get_settings)):
 def scan_demo(ctx: Context = Depends(current_context), service: ScanService = Depends(get_service)):
     if not DEMO_PROJECT_DIR.is_dir():
         raise HTTPException(404, "Projet de démonstration absent")
-    scan = _new_scan(ctx, project_name="Acme Shop (démo)", source="demo")
+    scan = _new_scan(service, ctx, project_name="Acme Shop (démo)", source="demo")
     service.submit(scan, DEMO_PROJECT_DIR)
     return scan
 
@@ -111,6 +121,8 @@ async def scan_upload(
     settings = service.settings
     if not (file.filename or "").lower().endswith(".zip"):
         raise HTTPException(400, "Seules les archives .zip sont acceptées.")
+    # Quotas vérifiés avant de recevoir l'archive
+    scan = _new_scan(service, ctx, project_name=project_name.strip() or "Projet importé", source="upload")
     workspace = Workspace(settings.data_dir / "work")
     try:
         archive = workspace.path / "upload.zip"
@@ -131,7 +143,6 @@ async def scan_upload(
     except Exception:
         workspace.cleanup()
         raise
-    scan = _new_scan(ctx, project_name=project_name.strip() or "Projet importé", source="upload")
     service.submit(scan, source_dir, workspace)
     return scan
 
@@ -144,12 +155,12 @@ def scan_git(body: GitRequest, ctx: Context = Depends(current_context), service:
         raise HTTPException(400, str(exc)) from exc
     branch = (body.branch or "").strip() or None
     repo_name = url.removesuffix(".git").split("/")[-1]
-    workspace = Workspace(service.settings.data_dir / "work")
-    source_dir = workspace.path / "src"
     scan = _new_scan(
-        ctx, project_name=(body.project_name or "").strip() or repo_name, source="git",
+        service, ctx, project_name=(body.project_name or "").strip() or repo_name, source="git",
         source_url=url + (f"@{branch}" if branch else ""),
     )
+    workspace = Workspace(service.settings.data_dir / "work")
+    source_dir = workspace.path / "src"
     service.submit(
         scan, source_dir, workspace,
         prepare=("Clonage du dépôt", lambda: clone_repository(url, branch, source_dir, service.settings)),
@@ -164,9 +175,9 @@ def scan_snippet(body: SnippetRequest, ctx: Context = Depends(current_context), 
         raise HTTPException(400, "Extension non supportée (.py, .js, .ts, .php, .java…).")
     if not body.code.strip():
         raise HTTPException(400, "Le code est vide.")
+    scan = _new_scan(service, ctx, project_name=body.project_name.strip() or "Extrait de code", source="snippet")
     workspace = Workspace(service.settings.data_dir / "work")
     (workspace.path / filename).write_text(body.code, encoding="utf-8")
-    scan = _new_scan(ctx, project_name=body.project_name.strip() or "Extrait de code", source="snippet")
     service.submit(scan, workspace.path, workspace)
     return scan
 
@@ -230,7 +241,8 @@ def dismiss_finding(finding_id: str, body: DismissRequest, ctx: Context = Depend
 def ai_costs(ctx: Context = Depends(current_context), service: ScanService = Depends(get_service)):
     """Coût IA par analyse de l'organisation (SS-12) : appels, cache, jetons et estimation en dollars."""
     settings = service.settings
-    max_calls, max_tokens = settings.ai_budget
+    plan = service.storage.get_org(ctx.org_id)["plan"]
+    max_calls, max_tokens = settings.ai_budget_for(plan)
     scans = [s for s in service.storage.list_scans(org_id=ctx.org_id) if s.status == "completed"]
     rows = [
         {"id": s.id, "project_name": s.project_name, "created_at": s.created_at, "plan": s.summary.plan,
@@ -240,7 +252,7 @@ def ai_costs(ctx: Context = Depends(current_context), service: ScanService = Dep
         for s in scans
     ]
     return {
-        "plan": settings.secuscan_plan, "budget_calls": max_calls, "budget_tokens": max_tokens,
+        "plan": plan, "budget_calls": max_calls, "budget_tokens": max_tokens,
         "price_input_per_mtok": settings.secuscan_ai_price_input_per_mtok,
         "price_output_per_mtok": settings.secuscan_ai_price_output_per_mtok,
         "total_cost_usd": round(sum(r["cost_usd"] for r in rows), 4),
@@ -269,6 +281,9 @@ def report_pdf(
         raise HTTPException(409, "L'analyse n'est pas terminée")
     prepared_for = (prepared_for or "").strip() or None
     prepared_by = (prepared_by or "").strip() or None
+    org = service.storage.get_org(ctx.org_id)
+    if prepared_by and not has_feature(org["plan"], "white_label"):
+        raise HTTPException(402, "La marque blanche (« Réalisé par ») est incluse dans l'offre Business.")
     pdf = build_pdf(scan, service.storage.list_findings(scan_id), prepared_for, prepared_by)
     _audit(service, ctx, "report.exported", scan_id,
            {"format": "pdf", "project": scan.project_name, "prepared_for": prepared_for, "prepared_by": prepared_by})

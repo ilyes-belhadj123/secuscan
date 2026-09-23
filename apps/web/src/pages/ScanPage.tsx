@@ -3,6 +3,7 @@ import { Link, useNavigate, useParams } from "react-router-dom";
 import { api, type Finding, type FindingKind, type FindingStatus, type HistoryPoint, type Scan, type Severity } from "../api";
 import { SeverityBadge, VerdictBadge } from "../components/Badges";
 import { OwaspChart, ScoreHistoryChart, SeverityChart } from "../components/Charts";
+import { useSession } from "../session";
 import {
   KIND_LABEL, LANGUAGE_LABEL, SEVERITIES, SEVERITY_LABEL, formatDate, formatTokens, formatUsd, grade,
 } from "../labels";
@@ -323,8 +324,10 @@ const PREPARED_BY_KEY = "secuscan.preparedBy";
 
 /** Export PDF, optionnellement en marque blanche (nom de l'ESN à la place de SecuScan). */
 function ExportModal({ scanId, onClose }: { scanId: string; onClose: () => void }) {
+  const { me } = useSession();
+  const whiteLabel = me?.org.features.includes("white_label") ?? false;
   const [preparedFor, setPreparedFor] = useState("");
-  const [preparedBy, setPreparedBy] = useState(() => localStorage.getItem(PREPARED_BY_KEY) ?? "");
+  const [preparedBy, setPreparedBy] = useState(() => (whiteLabel ? localStorage.getItem(PREPARED_BY_KEY) ?? "" : ""));
   return (
     <div className="modal-backdrop" onClick={onClose}>
       <div className="modal stack" onClick={(e) => e.stopPropagation()} role="dialog" aria-modal="true">
@@ -335,10 +338,13 @@ function ExportModal({ scanId, onClose }: { scanId: string; onClose: () => void 
         </label>
         <label className="field">
           Réalisé par (votre société, facultatif)
-          <input value={preparedBy} onChange={(e) => setPreparedBy(e.target.value)} placeholder="Ex. Exemple Conseil" maxLength={120} />
+          <input value={preparedBy} onChange={(e) => setPreparedBy(e.target.value)} placeholder="Ex. Exemple Conseil"
+                 maxLength={120} disabled={!whiteLabel} />
         </label>
         <p className="small muted" style={{ margin: 0 }}>
-          Si « Réalisé par » est renseigné, le rapport est en marque blanche : votre nom remplace SecuScan.
+          {whiteLabel
+            ? "Si « Réalisé par » est renseigné, le rapport est en marque blanche : votre nom remplace SecuScan."
+            : <>La marque blanche est incluse dans l'offre Business. <Link to="/offre">Voir les offres</Link></>}
         </p>
         <div className="row" style={{ justifyContent: "flex-end" }}>
           <button className="btn btn-ghost" onClick={onClose}>Annuler</button>

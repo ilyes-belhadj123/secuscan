@@ -90,6 +90,19 @@ CREATE TABLE IF NOT EXISTS invitations (
     accepted_at TEXT,
     created_at TEXT NOT NULL
 );
+CREATE TABLE IF NOT EXISTS invoices (
+    id TEXT PRIMARY KEY,
+    org_id TEXT NOT NULL,
+    number TEXT NOT NULL,
+    period TEXT NOT NULL,
+    plan TEXT NOT NULL,
+    seats INTEGER NOT NULL,
+    unit_price_eur REAL NOT NULL,
+    amount_eur REAL NOT NULL,
+    status TEXT NOT NULL,
+    provider TEXT NOT NULL,
+    created_at TEXT NOT NULL
+);
 CREATE TABLE IF NOT EXISTS sessions (
     token_hash TEXT PRIMARY KEY,
     user_id TEXT NOT NULL,
@@ -103,6 +116,7 @@ CREATE TABLE IF NOT EXISTS sessions (
 _ADDED_COLUMNS = {
     "scans": [("org_id", "TEXT NOT NULL DEFAULT ''")],
     "audit_logs": [("org_id", "TEXT NOT NULL DEFAULT ''"), ("actor", "TEXT NOT NULL DEFAULT ''")],
+    "organizations": [("plan", "TEXT NOT NULL DEFAULT 'free'")],
 }
 
 
@@ -271,16 +285,64 @@ class Storage:
         return dict(zip(("id", "email", "name"), row, strict=True)) if row else None
 
     # --- Organisations et adhésions ------------------------------------
-    def create_org(self, name: str) -> dict:
-        org = {"id": _id(), "name": name, "created_at": now_iso()}
+    def create_org(self, name: str, plan: str = "free") -> dict:
+        org = {"id": _id(), "name": name, "created_at": now_iso(), "plan": plan}
         with self._lock, self._conn() as conn:
-            conn.execute("INSERT INTO organizations VALUES (?, ?, ?)", (org["id"], name, org["created_at"]))
+            conn.execute(
+                "INSERT INTO organizations (id, name, created_at, plan) VALUES (?, ?, ?, ?)",
+                (org["id"], name, org["created_at"], plan),
+            )
         return org
 
     def get_org(self, org_id: str) -> dict | None:
         with self._conn() as conn:
-            row = conn.execute("SELECT id, name, created_at FROM organizations WHERE id = ?", (org_id,)).fetchone()
-        return dict(zip(("id", "name", "created_at"), row, strict=True)) if row else None
+            row = conn.execute(
+                "SELECT id, name, created_at, plan FROM organizations WHERE id = ?", (org_id,)
+            ).fetchone()
+        return dict(zip(("id", "name", "created_at", "plan"), row, strict=True)) if row else None
+
+    def set_org_plan(self, org_id: str, plan: str) -> None:
+        with self._lock, self._conn() as conn:
+            conn.execute("UPDATE organizations SET plan = ? WHERE id = ?", (plan, org_id))
+
+    # --- Quotas (SS-20) ------------------------------------------------
+    def count_scans_since(self, org_id: str, since_iso: str) -> int:
+        with self._conn() as conn:
+            return conn.execute(
+                "SELECT COUNT(*) FROM scans WHERE org_id = ? AND created_at >= ?", (org_id, since_iso)
+            ).fetchone()[0]
+
+    def project_names(self, org_id: str) -> set[str]:
+        with self._conn() as conn:
+            rows = conn.execute("SELECT DISTINCT project_name FROM scans WHERE org_id = ?", (org_id,)).fetchall()
+        return {r[0] for r in rows}
+
+    # --- Factures (SS-20) ----------------------------------------------
+    def create_invoice(self, org_id: str, period: str, plan: str, seats: int, unit_price: float,
+                       status: str, provider: str) -> dict:
+        with self._lock, self._conn() as conn:
+            count = conn.execute("SELECT COUNT(*) FROM invoices").fetchone()[0]
+            invoice = {
+                "id": _id(), "org_id": org_id, "number": f"SS-{period.replace('-', '')}-{count + 1:04d}",
+                "period": period, "plan": plan, "seats": seats, "unit_price_eur": unit_price,
+                "amount_eur": round(seats * unit_price, 2), "status": status, "provider": provider,
+                "created_at": now_iso(),
+            }
+            conn.execute(
+                "INSERT INTO invoices VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                tuple(invoice[k] for k in ("id", "org_id", "number", "period", "plan", "seats", "unit_price_eur",
+                                           "amount_eur", "status", "provider", "created_at")),
+            )
+        return invoice
+
+    def list_invoices(self, org_id: str) -> list[dict]:
+        keys = ("id", "number", "period", "plan", "seats", "unit_price_eur", "amount_eur", "status", "provider",
+                "created_at")
+        with self._conn() as conn:
+            rows = conn.execute(
+                f"SELECT {', '.join(keys)} FROM invoices WHERE org_id = ? ORDER BY created_at DESC", (org_id,)
+            ).fetchall()
+        return [dict(zip(keys, r, strict=True)) for r in rows]
 
     def count_orgs(self) -> int:
         with self._conn() as conn:

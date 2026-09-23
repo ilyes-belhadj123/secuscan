@@ -7,6 +7,7 @@ import CostsPage from "./pages/CostsPage";
 import FindingPage from "./pages/FindingPage";
 import HomePage from "./pages/HomePage";
 import OrgPage from "./pages/OrgPage";
+import PlanPage from "./pages/PlanPage";
 import ScanPage from "./pages/ScanPage";
 import { isAdmin, useSession } from "./session";
 
@@ -58,6 +59,7 @@ function Topbar({ health }: { health: Health | null }) {
           <Link to="/couts" className="small" style={{ fontWeight: 600 }}>Coûts IA</Link>
           {isAdmin(me) && <Link to="/audit" className="small" style={{ fontWeight: 600 }}>Journal d'audit</Link>}
           <Link to="/organisation" className="small" style={{ fontWeight: 600 }}>Équipe</Link>
+          <Link to="/offre" className="small" style={{ fontWeight: 600 }}>Offre {me.org.plan_name}</Link>
         </>
       )}
       {health && (
@@ -98,6 +100,7 @@ export default function App() {
           <Route path="/couts" element={<CostsPage />} />
           <Route path="/audit" element={isAdmin(me) ? <AuditPage /> : <Navigate to="/" replace />} />
           <Route path="/organisation" element={<OrgPage />} />
+          <Route path="/offre" element={<PlanPage />} />
           <Route path="/invitation/:token" element={<InvitationPage />} />
           <Route path="*" element={<Navigate to="/" replace />} />
         </Routes>

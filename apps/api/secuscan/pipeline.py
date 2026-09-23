@@ -8,7 +8,7 @@ from collections.abc import Callable
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from pathlib import Path
 
-from .ai.enricher import AIUnavailable, BudgetExceeded, Enricher
+from .ai.enricher import AIBudget, AIUnavailable, BudgetExceeded, Enricher
 from .analyzers import sast, sca, secrets
 from .analyzers.context import enclosing_excerpt, file_header
 from .analyzers.rules import RULES_BY_ID
@@ -104,7 +104,7 @@ class ScanService:
         self._progress(scan, "Analyse des dépendances", 0.35)
         findings += self._dependencies(scan, codebase, redacted)
 
-        enricher = Enricher(self.settings, self.storage)
+        enricher = Enricher(self.settings, self.storage, AIBudget(*self.settings.ai_budget_for(self._plan(scan))))
         findings += self._logic(scan, findings, redacted, enricher)
 
         findings = self._apply_dismissals(scan, findings)
@@ -350,9 +350,9 @@ class ScanService:
         elif errors:
             s.warnings.append(f"{errors} alerte(s) sans analyse IA (service IA indisponible).")
         if refused:
-            max_calls, max_tokens = self.settings.ai_budget
+            max_calls, max_tokens = self.settings.ai_budget_for(self._plan(scan))
             s.warnings.append(
-                f"Budget IA atteint (offre {self.settings.secuscan_plan} : {max_calls} appels / "
+                f"Budget IA atteint (offre {self._plan(scan)} : {max_calls} appels / "
                 f"{max_tokens // 1000} k jetons par analyse) : {refused} alerte(s) parmi les moins graves "
                 f"affichées avec l'explication générique de leur règle."
             )
@@ -364,7 +364,10 @@ class ScanService:
         s.ai_tokens = enricher.stats.tokens
         s.ai_cost_usd = round(enricher.stats.cost_usd(self.settings), 4)
         s.ai_budget_calls = enricher.budget.max_calls
-        s.plan = self.settings.secuscan_plan
+        s.plan = self._plan(scan)
+
+    def _plan(self, scan: Scan) -> str:
+        return scan.plan or self.settings.secuscan_plan
 
     def _compare_with_previous(self, scan: Scan, findings: list[Finding]) -> None:
         previous = self.storage.previous_completed_scan(scan.project_name, scan.created_at, org_id=scan.org_id or "")

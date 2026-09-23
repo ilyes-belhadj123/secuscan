@@ -136,6 +136,8 @@ class Scan(BaseModel):
     # Organisation propriétaire (vide : outils internes, invisible des utilisateurs)
     org_id: str | None = None
     created_by: str | None = None
+    # Offre de l'organisation au lancement (fixe le budget IA de l'analyse)
+    plan: str | None = None
     source: Literal["upload", "snippet", "demo", "git"]
     source_url: str | None = None
     status: ScanStatus = "queued"

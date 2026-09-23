@@ -164,11 +164,49 @@ export interface Health {
 
 export interface Me {
   user: { id: string; email: string; name: string };
-  org: { id: string; name: string; role: Role; role_label: string };
+  org: { id: string; name: string; role: Role; role_label: string; plan: PlanId; plan_name: string; features: string[] };
   organizations: { org_id: string; name: string; role: Role }[];
 }
 
 export type Role = "owner" | "admin" | "member";
+export type PlanId = "free" | "pro" | "business";
+
+export interface PlanOffer {
+  id: PlanId;
+  name: string;
+  tagline: string;
+  price_per_member_eur: number;
+  monthly_scans: number | null;
+  projects: number | null;
+  members: number | null;
+  ai_calls_per_scan: number;
+  features: string[];
+}
+
+export interface Invoice {
+  id: string;
+  number: string;
+  period: string;
+  plan: PlanId;
+  seats: number;
+  unit_price_eur: number;
+  amount_eur: number;
+  status: string;
+  provider: string;
+  created_at: string;
+}
+
+export interface Billing {
+  plan: PlanId;
+  plan_name: string;
+  usage: { scans_this_month: number; projects: number; members: number; pending_invitations: number };
+  limits: { monthly_scans: number | null; projects: number | null; members: number | null };
+  monthly_estimate_eur: number;
+  catalog: PlanOffer[];
+  invoices: Invoice[];
+  provider: "demo" | "webhook";
+  can_manage: boolean;
+}
 
 export interface OrgDetails {
   id: string;
@@ -263,6 +301,8 @@ export const api = {
   dismiss: (id: string, reason: string, justification: string) =>
     request<Finding>(`/api/findings/${id}/dismiss`, json({ reason, justification })),
   audit: () => request<AuditEntry[]>("/api/audit"),
+  billing: () => request<Billing>("/api/billing"),
+  selectPlan: (plan: PlanId) => request<{ invoice: Invoice | null }>("/api/billing/plan", send("POST", { plan })),
   costs: () => request<Costs>("/api/costs"),
   reportUrl: (id: string, format: "pdf" | "json", options?: { preparedFor?: string; preparedBy?: string }) => {
     const params = new URLSearchParams();

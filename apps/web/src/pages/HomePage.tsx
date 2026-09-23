@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState, type DragEvent } from "react";
-import { useNavigate } from "react-router-dom";
-import { api, type Health, type Scan } from "../api";
+import { Link, useNavigate } from "react-router-dom";
+import { ApiError, api, type Health, type Scan } from "../api";
 import { formatDate, grade } from "../labels";
 
 const SNIPPET_EXAMPLE = `from flask import request
@@ -25,6 +25,7 @@ export default function HomePage({ health }: { health: Health | null }) {
   const [scans, setScans] = useState<Scan[]>([]);
   const [busy, setBusy] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [quotaReached, setQuotaReached] = useState(false);
   const [dragging, setDragging] = useState(false);
   const [projectName, setProjectName] = useState("");
   const [code, setCode] = useState(SNIPPET_EXAMPLE);
@@ -45,6 +46,7 @@ export default function HomePage({ health }: { health: Health | null }) {
       navigate(`/scans/${scan.id}`);
     } catch (e) {
       setError((e as Error).message);
+      setQuotaReached(e instanceof ApiError && e.status === 402);
       setBusy(null);
     }
   }
@@ -71,7 +73,11 @@ export default function HomePage({ health }: { health: Health | null }) {
         </p>
       </section>
 
-      {error && <div className="card error">{error}</div>}
+      {error && (
+        <div className={quotaReached ? "warning-box" : "card error"} role="alert">
+          {error} {quotaReached && <Link to="/offre">Voir les offres →</Link>}
+        </div>
+      )}
 
       <section className="grid-2">
         <div className="card import-card">

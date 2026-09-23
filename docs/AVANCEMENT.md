@@ -9,8 +9,8 @@ Légende : ✅ fait · 🟡 partiel (voir « reste à faire ») · ⬜ à faire 
 | | Tickets |
 |---|---|
 | ✅ Fait | 16 |
-| 🟡 Partiel | 2 |
-| ⬜ À faire | 6 |
+| 🟡 Partiel | 3 |
+| ⬜ À faire | 5 |
 
 ## Qualité de détection (benchmark SS-8)
 
@@ -76,7 +76,7 @@ volontairement vulnérable « Acme Shop » (4 langages).
 | SS-17 | Connexion GitHub / GitLab | 🟡 | Analyse d'un dépôt **public** par URL (clone superficiel sécurisé) | OAuth, dépôts privés, jetons chiffrés, choix de branche via liste |
 | SS-18 | Export PDF et JSON | ✅ | PDF (marque blanche : client / société), JSON + schéma publié | Logo de l'organisation |
 | SS-19 | Journal d'audit | ✅ | Ajout seul, par organisation, réservé aux administrateurs, auteur de chaque action ; analyses, alertes ignorées, exports, membres (invitation, arrivée, rôle, départ) | — |
-| SS-20 | Offres Free / Pro / Business | ⬜ | — | Plans, quotas, paiement |
+| SS-20 | Offres Free / Pro / Business | 🟡 | Offre par organisation ; quotas appliqués côté serveur (Free : 5 analyses / mois, 1 projet, 3 membres ; Pro : 100 ; Business : 500 + marque blanche), budget IA selon l'offre, changement d'offre par le propriétaire avec contrôle de l'usage, factures pro forma, webhook de paiement signé (HMAC), page « Offre et facturation » | Brancher un vrai prestataire de paiement (Stripe…) ; **valider les tarifs** (29 € / 79 € HT par membre et par mois : provisoires) |
 
 ## Bêta et V2
 
@@ -89,8 +89,8 @@ volontairement vulnérable « Acme Shop » (4 langages).
 
 ## Prochaines étapes
 
-1. SS-20 — offres Free / Pro / Business : quotas par organisation (le budget IA existe déjà par offre).
-2. SS-17 — OAuth GitHub / GitLab pour les dépôts privés.
+1. SS-17 — OAuth GitHub / GitLab pour les dépôts privés.
+2. Réinitialisation du mot de passe (nécessite l'envoi d'e-mails : SMTP).
 3. SS-5 — brancher un moteur SAST open source en complément des règles maison.
 4. Mise en ligne (hébergement HTTPS) : désormais possible grâce aux comptes.
 
@@ -98,7 +98,8 @@ volontairement vulnérable « Acme Shop » (4 langages).
 
 | Date | Commit | Contenu |
 |---|---|---|
-| 23/09/2026 | (ce commit) | SS-2 comptes, organisations, rôles, invitations, isolation multi-tenant ; SS-19 audit réservé aux admins ; interrupteur `SECUSCAN_AI_DISABLED` |
+| 23/09/2026 | (ce commit) | SS-20 offres, quotas, changement d'offre, factures pro forma, webhook signé |
+| 23/09/2026 | `4132b5d` | SS-2 comptes, organisations, rôles, invitations, isolation multi-tenant ; SS-19 audit réservé aux admins ; interrupteur `SECUSCAN_AI_DISABLED` |
 | 23/09/2026 | `312720e` | SS-10 relecture de 30 explications IA, prompt v2 (environnement d'exécution, rien d'inventé, CWE précis), extraits sans accolade du bloc parent |
 | 23/09/2026 | `746bdce` | SS-11 vérification syntaxique des correctifs dans les 4 langages (89/89 valides) |
 | 23/09/2026 | `783b6ed` | SS-12 coûts IA : budget par offre, priorisation, dépendances sans IA, page « Coûts IA » ; robustesse aux réponses vides / tronquées. Vrai projet NodeGoat avec IA : 25 failles logiques trouvées pour 0,97 $ |

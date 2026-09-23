@@ -14,8 +14,10 @@ from .auth import (
     token_hash,
     verify_or_dummy,
 )
+from .billing import check_member_quota
 from .deps import ROLE_LABELS, SESSION_COOKIE, Context, current_context, get_service, require_admin
 from .pipeline import ScanService
+from .plans import QuotaExceeded, get_plan
 
 router = APIRouter(prefix="/api")
 login_limiter = LoginRateLimiter()
@@ -64,9 +66,12 @@ def _valid_invitation(service: ScanService, token: str) -> dict:
 
 
 def _me(service: ScanService, ctx: Context) -> dict:
+    org = service.storage.get_org(ctx.org_id)
+    plan = get_plan(org["plan"] if org else None)
     return {
         "user": {"id": ctx.user_id, "email": ctx.email, "name": ctx.name},
-        "org": {"id": ctx.org_id, "name": ctx.org_name, "role": ctx.role, "role_label": ROLE_LABELS[ctx.role]},
+        "org": {"id": ctx.org_id, "name": ctx.org_name, "role": ctx.role, "role_label": ROLE_LABELS[ctx.role],
+                "plan": plan.id, "plan_name": plan.name, "features": sorted(plan.features)},
         "organizations": service.storage.memberships_of(ctx.user_id),
     }
 
@@ -93,7 +98,8 @@ def register(body: RegisterRequest, response: Response, service: ScanService = D
         storage.accept_invitation(invitation["id"])
     else:
         first_org = storage.count_orgs() == 0
-        org_id, role = storage.create_org(body.org_name.strip())["id"], "owner"
+        plan = service.settings.secuscan_first_org_plan if first_org else "free"
+        org_id, role = storage.create_org(body.org_name.strip(), plan=plan)["id"], "owner"
         if first_org:
             storage.claim_orphan_data(org_id)  # analyses faites avant l'arrivée des comptes
     storage.add_membership(org_id, user["id"], role)
@@ -160,6 +166,10 @@ def invite(body: InvitationRequest, ctx: Context = Depends(require_admin), servi
     email = body.email.lower()
     if any(m["email"] == email for m in storage.list_members(ctx.org_id)):
         raise HTTPException(409, "Cette personne est déjà membre de l'organisation.")
+    try:
+        check_member_quota(storage, ctx.org_id)
+    except QuotaExceeded as exc:
+        raise HTTPException(402, str(exc)) from exc
     token = new_token()
     inv = storage.create_invitation(ctx.org_id, email, body.role, token_hash(token),
                                     time.time() + INVITATION_TTL_SECONDS, ctx.user_id)

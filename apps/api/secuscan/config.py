@@ -44,7 +44,17 @@ class Settings(BaseSettings):
     # Origines autorisées pour les requêtes qui modifient des données (protection CSRF)
     secuscan_allowed_origins: list[str] = ["http://127.0.0.1:5173", "http://localhost:5173"]
 
+    # Offres (SS-20)
+    # Offre de la toute première organisation (propriétaire de l'installation) ; les suivantes : free
+    secuscan_first_org_plan: str = "business"
+    # Tarifs indicatifs en € HT par membre et par mois (provisoires, à valider commercialement)
+    secuscan_price_pro_eur: float = 29.0
+    secuscan_price_business_eur: float = 79.0
+    # Secret partagé avec le prestataire de paiement pour signer les webhooks (vide : webhook désactivé)
+    secuscan_billing_webhook_secret: str = ""
+
     # Maîtrise des coûts IA (SS-12)
+    # Offre par défaut des analyses sans organisation (outils internes : benchmark, préparation démo)
     secuscan_plan: str = "pro"
     # Part maximale du budget d'appels consacrée à la revue logique des fichiers
     secuscan_logic_budget_share: float = 0.25
@@ -56,8 +66,15 @@ class Settings(BaseSettings):
 
     @property
     def ai_budget(self) -> tuple[int, int]:
-        """(appels max, jetons max) par analyse selon l'offre."""
-        return PLAN_AI_BUDGETS.get(self.secuscan_plan, PLAN_AI_BUDGETS["pro"])
+        """(appels max, jetons max) par analyse pour l'offre par défaut (outils internes)."""
+        return self.ai_budget_for(self.secuscan_plan)
+
+    @staticmethod
+    def ai_budget_for(plan: str | None) -> tuple[int, int]:
+        return PLAN_AI_BUDGETS.get(plan or "free", PLAN_AI_BUDGETS["free"])
+
+    def price_per_member(self, plan: str) -> float:
+        return {"pro": self.secuscan_price_pro_eur, "business": self.secuscan_price_business_eur}.get(plan, 0.0)
 
     # Limites d'import
     max_upload_bytes: int = 100 * 1024 * 1024
