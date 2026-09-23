@@ -161,7 +161,10 @@ class SnippetRequest(BaseModel):
 
 
 class GitRequest(BaseModel):
-    url: str = Field(max_length=300)
+    # Dépôt public par URL, ou dépôt du compte connecté (provider + repo, SS-17)
+    url: str | None = Field(default=None, max_length=300)
+    provider: Literal["github", "gitlab"] | None = None
+    repo: str | None = Field(default=None, max_length=200)
     branch: str | None = Field(default=None, max_length=100)
     project_name: str | None = Field(default=None, max_length=120)
 

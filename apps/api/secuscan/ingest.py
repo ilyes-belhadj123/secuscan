@@ -187,8 +187,12 @@ def validate_git_url(url: str, branch: str | None) -> str:
     return url.rstrip("/")
 
 
-def clone_repository(url: str, branch: str | None, dest: Path, settings: Settings) -> None:
-    """Clone superficiel d'un dépôt public, sans hooks, LFS, sous-modules ni invite d'identifiants."""
+def clone_repository(url: str, branch: str | None, dest: Path, settings: Settings, auth_header: str | None = None) -> None:
+    """Clone superficiel, sans hooks, LFS, sous-modules ni invite d'identifiants.
+
+    `auth_header` (dépôt privé) est transmis à git par variables d'environnement : il n'apparaît
+    ni dans la ligne de commande (liste des processus) ni dans les messages d'erreur.
+    """
     if not shutil.which("git"):
         raise UploadError("git n'est pas installé sur le serveur d'analyse.")
     cmd = [
@@ -199,6 +203,9 @@ def clone_repository(url: str, branch: str | None, dest: Path, settings: Setting
         cmd += ["--branch", branch]
     cmd += ["--", url, str(dest)]
     env = {**os.environ, "GIT_TERMINAL_PROMPT": "0", "GIT_LFS_SKIP_SMUDGE": "1", "GCM_INTERACTIVE": "never"}
+    if auth_header:
+        env.update({"GIT_CONFIG_COUNT": "1", "GIT_CONFIG_KEY_0": "http.extraHeader",
+                    "GIT_CONFIG_VALUE_0": f"Authorization: {auth_header}"})
     try:
         result = subprocess.run(cmd, capture_output=True, text=True, timeout=CLONE_TIMEOUT_SECONDS, env=env)
     except subprocess.TimeoutExpired as exc:
@@ -206,9 +213,13 @@ def clone_repository(url: str, branch: str | None, dest: Path, settings: Setting
     if result.returncode != 0:
         detail = result.stderr.strip().splitlines()[-1] if result.stderr.strip() else ""
         if "not found" in detail.lower() or "could not read" in detail.lower() or "authentication" in detail.lower():
-            raise UploadError("Dépôt introuvable ou privé (seuls les dépôts publics sont pris en charge pour l'instant).")
+            if auth_header:
+                raise UploadError("Dépôt introuvable ou accès refusé : vérifiez les droits du compte connecté.")
+            raise UploadError("Dépôt introuvable ou privé : connectez votre compte GitHub / GitLab pour les dépôts privés.")
         if "remote branch" in detail.lower():
             raise UploadError(f"Branche introuvable : {branch}")
+        if auth_header:
+            detail = detail.replace(auth_header, "****")
         raise UploadError(f"Échec du clonage du dépôt : {detail[:200]}")
     remove_tree(dest / ".git")
     total = sum(p.stat().st_size for p in dest.rglob("*") if p.is_file() and not p.is_symlink())

@@ -155,6 +155,21 @@ export interface Costs {
   scans: CostRow[];
 }
 
+export interface GitProvider {
+  id: "github" | "gitlab";
+  name: string;
+  configured: boolean;
+  connected: boolean;
+  login: string | null;
+}
+
+export interface GitRepo {
+  id: string;
+  name: string;
+  private: boolean;
+  default_branch: string | null;
+}
+
 export interface Health {
   ai_enabled: boolean;
   model: string;
@@ -301,6 +316,14 @@ export const api = {
   },
   git: (url: string, branch: string, projectName: string) =>
     request<Scan>("/api/scans/git", json({ url, branch: branch || null, project_name: projectName || null })),
+  gitRepoScan: (provider: string, repo: string, branch: string) =>
+    request<Scan>("/api/scans/git", json({ provider, repo, branch: branch || null })),
+  gitProviders: () => request<GitProvider[]>("/api/git/providers"),
+  gitConnect: (provider: string) => request<{ authorize_url: string }>(`/api/git/${provider}/connect`),
+  gitDisconnect: (provider: string) => request(`/api/git/${provider}`, send("DELETE")),
+  gitRepos: (provider: string) => request<GitRepo[]>(`/api/git/${provider}/repos`),
+  gitBranches: (provider: string, repo: string) =>
+    request<string[]>(`/api/git/${provider}/branches?repo=${encodeURIComponent(repo)}`),
   snippet: (filename: string, code: string, projectName: string) =>
     request<Scan>("/api/scans/snippet", json({ filename, code, project_name: projectName })),
   dismiss: (id: string, reason: string, justification: string) =>

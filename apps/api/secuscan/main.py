@@ -16,6 +16,8 @@ from .billing import check_scan_quota
 from .billing import router as billing_router
 from .config import DEMO_PROJECT_DIR, Settings, get_settings
 from .deps import Context, current_context, get_service, require_admin
+from .gitproviders import clone_auth, provider_or_404
+from .gitproviders import router as git_router
 from .ingest import (
     UploadError,
     Workspace,
@@ -34,6 +36,7 @@ logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name
 app = FastAPI(title="SecuScan API", version="0.2.0")
 app.include_router(accounts_router)
 app.include_router(billing_router)
+app.include_router(git_router)
 
 _UNSAFE_METHODS = {"POST", "PUT", "PATCH", "DELETE"}
 
@@ -149,12 +152,24 @@ async def scan_upload(
 
 @app.post("/api/scans/git", status_code=202)
 def scan_git(body: GitRequest, ctx: Context = Depends(current_context), service: ScanService = Depends(get_service)):
+    branch = (body.branch or "").strip() or None
+    auth_header = None
+    if body.provider:
+        # Dépôt (éventuellement privé) du compte connecté : URL et accès fournis par l'API du fournisseur
+        if not body.repo:
+            raise HTTPException(400, "Choisissez un dépôt.")
+        provider_or_404(service.settings, body.provider)
+        url, auth_header, default_branch, repo_name = clone_auth(service, ctx, body.provider, body.repo)
+        branch = branch or default_branch or None
+    elif body.url:
+        url = body.url
+        repo_name = url.rstrip("/").removesuffix(".git").split("/")[-1]
+    else:
+        raise HTTPException(400, "Indiquez l'URL d'un dépôt public ou choisissez un dépôt connecté.")
     try:
-        url = validate_git_url(body.url, body.branch)
+        url = validate_git_url(url, branch)
     except UploadError as exc:
         raise HTTPException(400, str(exc)) from exc
-    branch = (body.branch or "").strip() or None
-    repo_name = url.removesuffix(".git").split("/")[-1]
     scan = _new_scan(
         service, ctx, project_name=(body.project_name or "").strip() or repo_name, source="git",
         source_url=url + (f"@{branch}" if branch else ""),
@@ -163,7 +178,8 @@ def scan_git(body: GitRequest, ctx: Context = Depends(current_context), service:
     source_dir = workspace.path / "src"
     service.submit(
         scan, source_dir, workspace,
-        prepare=("Clonage du dépôt", lambda: clone_repository(url, branch, source_dir, service.settings)),
+        prepare=("Clonage du dépôt",
+                 lambda: clone_repository(url, branch, source_dir, service.settings, auth_header=auth_header)),
     )
     return scan
 

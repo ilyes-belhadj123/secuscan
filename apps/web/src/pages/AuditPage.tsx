@@ -14,6 +14,10 @@ const ACTIONS: Record<string, { label: string; icon: string }> = {
   "member.role_changed": { label: "Rôle modifié", icon: "⇄" },
   "member.removed": { label: "Membre retiré", icon: "−" },
   "member.invitation_revoked": { label: "Invitation révoquée", icon: "⊘" },
+  "member.password_reset": { label: "Mot de passe réinitialisé", icon: "🔑" },
+  "billing.plan_changed": { label: "Offre modifiée", icon: "€" },
+  "git.connected": { label: "Compte Git connecté", icon: "🔗" },
+  "git.disconnected": { label: "Compte Git déconnecté", icon: "⊘" },
 };
 
 const ROLES: Record<string, string> = { owner: "propriétaire", admin: "administrateur", member: "membre" };
@@ -49,7 +53,14 @@ function describe(e: AuditEntry): string {
     case "member.removed":
       return d.self ? "Départ volontaire" : "Retiré par un administrateur";
     case "member.invitation_revoked":
+    case "member.password_reset":
       return "";
+    case "billing.plan_changed":
+      return `${d.from} → ${d.to} (${d.provider})`;
+    case "git.connected":
+      return `${d.provider} · compte ${d.login}`;
+    case "git.disconnected":
+      return String(d.provider ?? "");
     default:
       return JSON.stringify(d);
   }

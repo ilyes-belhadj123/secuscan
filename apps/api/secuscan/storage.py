@@ -103,6 +103,23 @@ CREATE TABLE IF NOT EXISTS invoices (
     provider TEXT NOT NULL,
     created_at TEXT NOT NULL
 );
+CREATE TABLE IF NOT EXISTS git_connections (
+    org_id TEXT NOT NULL,
+    user_id TEXT NOT NULL,
+    provider TEXT NOT NULL,
+    login TEXT NOT NULL,
+    token_encrypted TEXT NOT NULL,
+    scopes TEXT NOT NULL,
+    created_at TEXT NOT NULL,
+    PRIMARY KEY (org_id, user_id, provider)
+);
+CREATE TABLE IF NOT EXISTS oauth_states (
+    state_hash TEXT PRIMARY KEY,
+    org_id TEXT NOT NULL,
+    user_id TEXT NOT NULL,
+    provider TEXT NOT NULL,
+    expires_at REAL NOT NULL
+);
 CREATE TABLE IF NOT EXISTS password_resets (
     token_hash TEXT PRIMARY KEY,
     user_id TEXT NOT NULL,
@@ -481,6 +498,43 @@ class Storage:
                 "DELETE FROM invitations WHERE id = ? AND org_id = ? AND accepted_at IS NULL", (invitation_id, org_id)
             )
         return cur.rowcount > 0
+
+    # --- Connexions Git (SS-17) ----------------------------------------
+    def save_git_connection(self, org_id: str, user_id: str, provider: str, login: str,
+                            token_encrypted: str, scopes: str) -> None:
+        with self._lock, self._conn() as conn:
+            conn.execute("INSERT OR REPLACE INTO git_connections VALUES (?, ?, ?, ?, ?, ?, ?)",
+                         (org_id, user_id, provider, login, token_encrypted, scopes, now_iso()))
+
+    def get_git_connection(self, org_id: str, user_id: str, provider: str) -> dict | None:
+        with self._conn() as conn:
+            row = conn.execute(
+                "SELECT login, token_encrypted, scopes, created_at FROM git_connections "
+                "WHERE org_id = ? AND user_id = ? AND provider = ?", (org_id, user_id, provider),
+            ).fetchone()
+        return dict(zip(("login", "token_encrypted", "scopes", "created_at"), row, strict=True)) if row else None
+
+    def delete_git_connection(self, org_id: str, user_id: str, provider: str) -> None:
+        with self._lock, self._conn() as conn:
+            conn.execute("DELETE FROM git_connections WHERE org_id = ? AND user_id = ? AND provider = ?",
+                         (org_id, user_id, provider))
+
+    def save_oauth_state(self, state_hash: str, org_id: str, user_id: str, provider: str, expires_at: float) -> None:
+        with self._lock, self._conn() as conn:
+            conn.execute("DELETE FROM oauth_states WHERE expires_at < ?", (time.time(),))
+            conn.execute("INSERT INTO oauth_states VALUES (?, ?, ?, ?, ?)",
+                         (state_hash, org_id, user_id, provider, expires_at))
+
+    def pop_oauth_state(self, state_hash: str) -> dict | None:
+        """Lit et supprime l'état OAuth (usage unique, protection CSRF du retour OAuth)."""
+        with self._lock, self._conn() as conn:
+            row = conn.execute(
+                "SELECT org_id, user_id, provider, expires_at FROM oauth_states WHERE state_hash = ?", (state_hash,)
+            ).fetchone()
+            conn.execute("DELETE FROM oauth_states WHERE state_hash = ?", (state_hash,))
+        if not row or row[3] < time.time():
+            return None
+        return dict(zip(("org_id", "user_id", "provider"), row[:3], strict=True))
 
     # --- Sessions ------------------------------------------------------
     def create_session(self, token_hash: str, user_id: str, org_id: str, expires_at: float) -> None:

@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState, type DragEvent } from "react";
-import { Link, useNavigate } from "react-router-dom";
+import { Link, useNavigate, useSearchParams } from "react-router-dom";
 import { ApiError, api, type Health, type Scan } from "../api";
+import GitRepoPicker from "../components/GitRepoPicker";
 import { formatDate, grade } from "../labels";
 
 // Exemple volontairement vulnérable, prérempli dans « Coller du code »
@@ -30,6 +31,17 @@ export default function HomePage({ health }: { health: Health | null }) {
   const [busy, setBusy] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [quotaReached, setQuotaReached] = useState(false);
+  // Retour du parcours OAuth GitHub / GitLab (?git=connected|denied|error)
+  const [searchParams] = useSearchParams();
+  const gitStatus = searchParams.get("git");
+  const gitProvider = searchParams.get("provider") === "gitlab" ? "GitLab" : "GitHub";
+  const gitNotice = gitStatus === "connected"
+    ? { ok: true, text: `✓ Compte ${gitProvider} connecté : choisissez un dépôt dans la carte « Dépôt Git ».` }
+    : gitStatus === "denied"
+      ? { ok: false, text: `Connexion ${gitProvider} annulée.` }
+      : gitStatus === "error"
+        ? { ok: false, text: `La connexion ${gitProvider} a échoué ou a expiré : réessayez.` }
+        : null;
   const [dragging, setDragging] = useState(false);
   const [projectName, setProjectName] = useState("");
   const [code, setCode] = useState(SNIPPET_EXAMPLE);
@@ -77,6 +89,11 @@ export default function HomePage({ health }: { health: Health | null }) {
         </p>
       </section>
 
+      {gitNotice && (
+        <div className={gitNotice.ok ? "ai-note" : "warning-box"} role="status">
+          <span>{gitNotice.text}</span>
+        </div>
+      )}
       {error && (
         <div className={quotaReached ? "warning-box" : "card error"} role="alert">
           {error} {quotaReached && <Link to="/offre">Voir les offres →</Link>}
@@ -130,6 +147,12 @@ export default function HomePage({ health }: { health: Health | null }) {
             </button>
           </div>
           <div className="small muted">Clone superficiel, sans exécution du code, supprimé après analyse.</div>
+          <div style={{ borderTop: "1px solid var(--border)", paddingTop: 10 }}>
+            <GitRepoPicker
+              busy={!!busy}
+              onLaunch={(provider, repo, branch) => launch("git", () => api.gitRepoScan(provider, repo, branch))}
+            />
+          </div>
         </form>
 
         <div className="card import-card">

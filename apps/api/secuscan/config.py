@@ -51,6 +51,15 @@ class Settings(BaseSettings):
     # Origines autorisées pour les requêtes qui modifient des données (protection CSRF)
     secuscan_allowed_origins: list[str] = ["http://127.0.0.1:5173", "http://localhost:5173"]
 
+    # Connexion GitHub / GitLab (SS-17) : identifiants des applications OAuth et clé de chiffrement
+    secuscan_github_client_id: str = ""
+    secuscan_github_client_secret: str = ""
+    secuscan_gitlab_client_id: str = ""
+    secuscan_gitlab_client_secret: str = ""
+    secuscan_gitlab_url: str = "https://gitlab.com"
+    # Clé AES-256 (base64) qui chiffre les jetons d'accès stockés
+    secuscan_token_key: str = ""
+
     # Offres (SS-20)
     # Offre de la toute première organisation (propriétaire de l'installation) ; les suivantes : free
     secuscan_first_org_plan: str = "business"

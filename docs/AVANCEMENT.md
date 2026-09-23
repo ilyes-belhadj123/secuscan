@@ -73,7 +73,7 @@ volontairement vulnérable « Acme Shop » (4 langages).
 | SS-14 | Vue détaillée d'une faille | ✅ | Code surligné, explication / correctif / références, navigation clavier | — |
 | SS-15 | Tableau de bord projet | ✅ | Score 0-100 + note, graphiques sévérité et OWASP, évolution, comparaison avec l'analyse précédente | — |
 | SS-16 | Ignorer une alerte avec justification | ✅ | Justification obligatoire, empreinte stable entre analyses, audit | — |
-| SS-17 | Connexion GitHub / GitLab | 🟡 | Analyse d'un dépôt **public** par URL (clone superficiel sécurisé) | OAuth, dépôts privés, jetons chiffrés, choix de branche via liste |
+| SS-17 | Connexion GitHub / GitLab | 🟡 | Dépôts publics par URL ; **OAuth GitHub et GitLab** (état anti-CSRF à usage unique), dépôts privés, jetons chiffrés AES-256-GCM liés à l'organisation et à l'utilisateur, jeton transmis à git hors ligne de commande, choix du dépôt et de la branche, rafraîchissement des jetons GitLab ; testé avec GitHub simulé ([guide](connexion-github.md)) | **Créer l'application OAuth GitHub** (à faire par le propriétaire du compte) puis valider sur le vrai GitHub ; GitHub App pour une lecture seule stricte |
 | SS-18 | Export PDF et JSON | ✅ | PDF (marque blanche : client / société), JSON + schéma publié | Logo de l'organisation |
 | SS-19 | Journal d'audit | ✅ | Ajout seul, par organisation, réservé aux administrateurs, auteur de chaque action ; analyses, alertes ignorées, exports, membres (invitation, arrivée, rôle, départ) | — |
 | SS-20 | Offres Free / Pro / Business | 🟡 | Offre par organisation ; quotas appliqués côté serveur (Free : 5 analyses / mois, 1 projet, 3 membres ; Pro : 100 ; Business : 500 + marque blanche), budget IA selon l'offre, changement d'offre par le propriétaire avec contrôle de l'usage, factures pro forma, webhook de paiement signé (HMAC), page « Offre et facturation » | Brancher un vrai prestataire de paiement (Stripe…) ; **valider les tarifs** (29 € / 79 € HT par membre et par mois : provisoires) |
@@ -98,7 +98,8 @@ volontairement vulnérable « Acme Shop » (4 langages).
 
 | Date | Commit | Contenu |
 |---|---|---|
-| 23/09/2026 | (ce commit) | SS-23 CLI + SARIF + CI ; SecuScan s'analyse lui-même : correctif SCA (plages de package.json ignorées si lockfile) et react-router 6 → 7 (vulnérabilité GHSA-337j-9hxr-rhxg) |
+| 23/09/2026 | (ce commit) | SS-17 OAuth GitHub / GitLab, dépôts privés, jetons chiffrés ; script `configure-secrets.ps1` |
+| 23/09/2026 | `21aacd3` | SS-23 CLI + SARIF + CI ; SecuScan s'analyse lui-même : correctif SCA (plages de package.json ignorées si lockfile) et react-router 6 → 7 (vulnérabilité GHSA-337j-9hxr-rhxg) |
 | 23/09/2026 | `5be0ed6` | E-mails (SMTP ou boîte d'envoi locale), invitations par e-mail, mot de passe oublié |
 | 23/09/2026 | `a1b2e98` | SS-20 offres, quotas, changement d'offre, factures pro forma, webhook signé |
 | 23/09/2026 | `4132b5d` | SS-2 comptes, organisations, rôles, invitations, isolation multi-tenant ; SS-19 audit réservé aux admins ; interrupteur `SECUSCAN_AI_DISABLED` |
