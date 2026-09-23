@@ -22,6 +22,9 @@ class Settings(BaseSettings):
     secuscan_data_dir: Path = API_ROOT / "data"
     secuscan_ai_concurrency: int = 6
     secuscan_offline: bool = False
+    # Revue logique IA : fichiers de code analysés en entier (coût maîtrisé)
+    secuscan_logic_max_files: int = 40
+    secuscan_logic_max_lines: int = 400
 
     # Limites d'import
     max_upload_bytes: int = 100 * 1024 * 1024

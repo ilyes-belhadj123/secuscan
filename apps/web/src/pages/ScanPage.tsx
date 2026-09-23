@@ -5,16 +5,18 @@ import { SeverityBadge, VerdictBadge } from "../components/Badges";
 import { OwaspChart, ScoreHistoryChart, SeverityChart } from "../components/Charts";
 import { KIND_LABEL, LANGUAGE_LABEL, SEVERITIES, SEVERITY_LABEL, formatDate, grade } from "../labels";
 
-const STEPS = [
+const BASE_STEPS = [
   "Lecture du code et détection des langages",
   "Détection des secrets",
   "Analyse statique (règles)",
   "Analyse des dépendances",
+  "Revue logique par l'IA",
   "Enrichissement IA",
   "Calcul du score",
 ];
 
 function Progress({ scan }: { scan: Scan }) {
+  const STEPS = scan.source === "git" ? ["Clonage du dépôt", ...BASE_STEPS] : BASE_STEPS;
   const current = STEPS.findIndex((s) => scan.stage.startsWith(s));
   return (
     <div className="card stack" style={{ maxWidth: 640, margin: "40px auto" }}>
@@ -67,6 +69,7 @@ export default function ScanPage() {
   const [kindFilter, setKindFilter] = useState<FindingKind | null>(null);
   const [statusFilter, setStatusFilter] = useState<StatusFilter>("open");
   const [query, setQuery] = useState("");
+  const [showExport, setShowExport] = useState(false);
 
   useEffect(() => {
     let timer: number | undefined;
@@ -135,6 +138,11 @@ export default function ScanPage() {
         <div>
           <Link to="/" className="small">← Toutes les analyses</Link>
           <h1 style={{ marginTop: 4 }}>{scan.project_name}</h1>
+          {scan.source_url && (
+            <a className="small mono" href={scan.source_url.split("@")[0]} target="_blank" rel="noreferrer">
+              {scan.source_url}
+            </a>
+          )}
           <div className="secondary small">
             Analysé le {formatDate(scan.completed_at ?? scan.created_at)} · {s.files_scanned} fichiers ·{" "}
             {s.lines_scanned.toLocaleString("fr-FR")} lignes · {s.duration_seconds} s ·{" "}
@@ -145,9 +153,9 @@ export default function ScanPage() {
           <a className="btn" href={api.reportUrl(scan.id, "json")} download>
             ⤓ JSON
           </a>
-          <a className="btn btn-primary" href={api.reportUrl(scan.id, "pdf")} download>
+          <button className="btn btn-primary" onClick={() => setShowExport(true)}>
             ⤓ Rapport PDF
-          </a>
+          </button>
         </div>
       </div>
 
@@ -193,7 +201,8 @@ export default function ScanPage() {
 
       <section className="kpis">
         <Kpi label="Alertes critiques" value={s.by_severity.critical ?? 0} hint="à traiter en priorité" />
-        <Kpi label="Failles dans le code" value={s.by_kind.sast ?? 0} hint="règles statiques + IA" />
+        <Kpi label="Failles dans le code" value={s.by_kind.sast ?? 0} hint="règles statiques" />
+        <Kpi label="Failles logiques" value={s.by_kind.ai ?? 0} hint="trouvées par l'IA seule" />
         <Kpi label="Secrets exposés" value={s.by_kind.secret ?? 0} hint="valeurs jamais stockées" />
         <Kpi label="Dépendances vulnérables" value={s.by_kind.dependency ?? 0} hint="CVE connues" />
         <Kpi
@@ -242,7 +251,7 @@ export default function ScanPage() {
           <button className={`chip ${!kindFilter ? "active" : ""}`} onClick={() => setKindFilter(null)}>
             Tous types
           </button>
-          {(["sast", "secret", "dependency"] as FindingKind[]).map((k) => (
+          {(["sast", "ai", "secret", "dependency"] as FindingKind[]).map((k) => (
             <button key={k} className={`chip ${kindFilter === k ? "active" : ""}`} onClick={() => setKindFilter(k)}>
               {KIND_LABEL[k]}
             </button>
@@ -289,6 +298,47 @@ export default function ScanPage() {
           </table>
         )}
       </section>
+      {showExport && <ExportModal scanId={scan.id} onClose={() => setShowExport(false)} />}
     </main>
+  );
+}
+
+const PREPARED_BY_KEY = "secuscan.preparedBy";
+
+/** Export PDF, optionnellement en marque blanche (nom de l'ESN à la place de SecuScan). */
+function ExportModal({ scanId, onClose }: { scanId: string; onClose: () => void }) {
+  const [preparedFor, setPreparedFor] = useState("");
+  const [preparedBy, setPreparedBy] = useState(() => localStorage.getItem(PREPARED_BY_KEY) ?? "");
+  return (
+    <div className="modal-backdrop" onClick={onClose}>
+      <div className="modal stack" onClick={(e) => e.stopPropagation()} role="dialog" aria-modal="true">
+        <h2>Exporter le rapport PDF</h2>
+        <label className="field">
+          Préparé pour (client, facultatif)
+          <input value={preparedFor} onChange={(e) => setPreparedFor(e.target.value)} placeholder="Ex. Acme Corp" maxLength={120} />
+        </label>
+        <label className="field">
+          Réalisé par (votre société, facultatif)
+          <input value={preparedBy} onChange={(e) => setPreparedBy(e.target.value)} placeholder="Ex. Exemple Conseil" maxLength={120} />
+        </label>
+        <p className="small muted" style={{ margin: 0 }}>
+          Si « Réalisé par » est renseigné, le rapport est en marque blanche : votre nom remplace SecuScan.
+        </p>
+        <div className="row" style={{ justifyContent: "flex-end" }}>
+          <button className="btn btn-ghost" onClick={onClose}>Annuler</button>
+          <a
+            className="btn btn-primary"
+            href={api.reportUrl(scanId, "pdf", { preparedFor, preparedBy })}
+            download
+            onClick={() => {
+              localStorage.setItem(PREPARED_BY_KEY, preparedBy.trim());
+              window.setTimeout(onClose, 300);
+            }}
+          >
+            ⤓ Télécharger
+          </a>
+        </div>
+      </div>
+    </div>
   );
 }

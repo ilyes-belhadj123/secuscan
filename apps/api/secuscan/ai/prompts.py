@@ -50,6 +50,39 @@ Réponds avec exactement cet objet JSON :
   "best_practices": ["2 à 4 bonnes pratiques courtes"]
 }}"""
 
+LOGIC_TEMPLATE = """Revue de logique de sécurité d'un fichier complet
+- Fichier : {file}
+- Langage : {language}
+- Lignes déjà signalées par les règles statiques (ne pas les signaler à nouveau) : {flagged}
+
+Code (lignes numérotées pour référence) :
+```
+{numbered}
+```
+
+Cherche UNIQUEMENT les failles exploitables qu'une règle par motif ne peut pas détecter :
+contrôle d'accès (accès à la ressource d'un autre utilisateur, vérification de propriétaire ou
+de rôle absente), authentification, logique métier (prix, montant ou quantité fournis par le
+client, étape contournable), SSRF, redirection ouverte, affectation de masse, exposition de
+données sensibles, conditions de course.
+Ne signale rien de spéculatif : uniquement ce que le code montre, avec une confiance >= 0,7.
+Au maximum 5 failles ; liste vide s'il n'y en a pas.
+
+Réponds avec exactement cet objet JSON :
+{{
+  "findings": [
+    {{
+      "title": "titre court en français",
+      "cwe": "CWE-xxx",
+      "severity": "critical" | "high" | "medium" | "low",
+      "start_line": numéro,
+      "end_line": numéro,
+      "confidence": nombre entre 0 et 1,
+      "message": "une phrase décrivant le problème dans ce code"
+    }}
+  ]
+}}"""
+
 DEPENDENCY_TEMPLATE = """Dépendance vulnérable détectée
 - Écosystème : {ecosystem}
 - Paquet : {package} version {version}

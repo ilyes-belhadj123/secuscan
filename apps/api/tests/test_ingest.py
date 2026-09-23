@@ -2,7 +2,30 @@ import zipfile
 
 import pytest
 
-from secuscan.ingest import UploadError, collect_codebase, safe_extract_zip
+from secuscan.ingest import UploadError, collect_codebase, safe_extract_zip, validate_git_url
+
+
+@pytest.mark.parametrize("url", [
+    "https://github.com/acme/shop",
+    "https://github.com/acme/shop.git",
+    "https://gitlab.com/acme-group/sub/shop/",
+])
+def test_git_url_accepted(url):
+    assert validate_git_url(url, "main").startswith("https://")
+
+
+@pytest.mark.parametrize("url,branch", [
+    ("http://github.com/acme/shop", None),           # pas de HTTPS
+    ("https://evil.example.com/acme/shop", None),    # hôte non autorisé
+    ("file:///etc/passwd", None),
+    ("https://github.com/acme/../shop", None),
+    ("https://github.com/acme/shop --upload-pack=x", None),
+    ("https://github.com/acme/shop", "--upload-pack=x"),  # injection d'option via la branche
+    ("https://github.com/acme/shop", "a..b"),
+])
+def test_git_url_rejected(url, branch):
+    with pytest.raises(UploadError):
+        validate_git_url(url, branch)
 
 
 def _zip(path, entries: dict[str, bytes]):

@@ -4,6 +4,7 @@ import logging
 import re
 import time
 import uuid
+from collections.abc import Callable
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from pathlib import Path
 
@@ -40,18 +41,28 @@ class ScanService:
         self.executor = ThreadPoolExecutor(max_workers=2, thread_name_prefix="scan")
 
     # ------------------------------------------------------------------ API publique
-    def submit(self, scan: Scan, root: Path, workspace: Workspace | None = None) -> None:
+    def submit(
+        self, scan: Scan, root: Path, workspace: Workspace | None = None,
+        prepare: tuple[str, Callable[[], None]] | None = None,
+    ) -> None:
+        """Lance l'analyse en tâche de fond. `prepare` = (libellé, étape préalable), ex. clonage Git."""
         self.storage.save_scan(scan)
         self.storage.audit("scan.created", scan.id, {"project": scan.project_name, "source": scan.source})
-        self.executor.submit(self._run_safely, scan, root, workspace)
+        self.executor.submit(self._run_safely, scan, root, workspace, prepare)
 
-    def _run_safely(self, scan: Scan, root: Path, workspace: Workspace | None) -> None:
+    def _run_safely(self, scan: Scan, root: Path, workspace: Workspace | None, prepare=None) -> None:
         try:
+            if prepare:
+                label, step = prepare
+                scan.status = "running"
+                self._progress(scan, label, 0.02)
+                step()
             self.run(scan, root)
         except Exception as exc:  # noqa: BLE001 — l'erreur est remontée à l'utilisateur
             log.exception("Analyse %s échouée", scan.id)
             scan.status, scan.error, scan.stage = "failed", str(exc), "Échec"
             self.storage.save_scan(scan)
+            self.storage.audit("scan.failed", scan.id, {"project": scan.project_name, "error": str(exc)[:300]})
         finally:
             if workspace:
                 workspace.cleanup()  # le code importé est supprimé après analyse
@@ -77,11 +88,14 @@ class ScanService:
         self._progress(scan, "Analyse statique (règles)", 0.3)
         findings += self._sast(scan, redacted)
 
-        self._progress(scan, "Analyse des dépendances", 0.4)
+        self._progress(scan, "Analyse des dépendances", 0.35)
         findings += self._dependencies(scan, codebase, redacted)
 
+        enricher = Enricher(self.settings, self.storage)
+        findings += self._logic(scan, findings, redacted, enricher)
+
         findings = self._apply_dismissals(scan, findings)
-        self._enrich(scan, findings, redacted)
+        self._enrich(scan, findings, redacted, enricher)
 
         self._progress(scan, "Calcul du score", 0.97)
         for f in findings:
@@ -93,7 +107,10 @@ class ScanService:
         self.storage.save_findings(findings)
         scan.status, scan.stage, scan.progress, scan.completed_at = "completed", "Terminée", 1.0, now_iso()
         self.storage.save_scan(scan)
-        self.storage.audit("scan.completed", scan.id, {"findings": len(findings), "score": scan.score})
+        self.storage.audit(
+            "scan.completed", scan.id,
+            {"project": scan.project_name, "findings": scan.summary.total, "score": scan.score},
+        )
         return findings
 
     def _secrets(self, scan: Scan, codebase: CodeBase):
@@ -201,13 +218,60 @@ class ScanService:
                 f.dismiss_reason, f.dismiss_justification = dismissed[f.fingerprint]
         return findings
 
-    def _enrich(self, scan: Scan, findings: list[Finding], redacted: dict) -> None:
+    def _logic(self, scan: Scan, findings: list[Finding], redacted: dict, enricher: Enricher) -> list[Finding]:
+        """Revue IA de chaque fichier de code pour les failles logiques non couvertes par les règles."""
+        sources = [
+            src for path, src in redacted.items()
+            if path.split("/")[-1] not in MANIFEST_FILES
+            and src.content.count("\n") < self.settings.secuscan_logic_max_lines
+        ][: self.settings.secuscan_logic_max_files]
+        if not sources:
+            return []
+        flagged: dict[str, list[int]] = {}
+        for f in findings:
+            flagged.setdefault(f.file, []).append(f.start_line)
+
+        self._progress(scan, f"Revue logique par l'IA (0/{len(sources)})", 0.4)
+        results: list[Finding] = []
+        with ThreadPoolExecutor(max_workers=max(1, self.settings.secuscan_ai_concurrency)) as pool:
+            futures = {pool.submit(enricher.discover_logic_flaws, src, flagged.get(src.path, [])): src for src in sources}
+            for done, future in enumerate(as_completed(futures), start=1):
+                src = futures[future]
+                try:
+                    flaws = future.result()
+                except AIUnavailable:
+                    flaws = []  # sans IA ni cache, cette couche est simplement absente
+                except Exception:  # noqa: BLE001
+                    log.exception("Revue logique de %s échouée", src.path)
+                    flaws = []
+                lines = src.content.split("\n")
+                for flaw in flaws:
+                    # Une faille déjà couverte par une règle sur les mêmes lignes n'est pas dupliquée
+                    if any(flaw.start_line <= line <= flaw.end_line for line in flagged.get(src.path, [])):
+                        continue
+                    excerpt = enclosing_excerpt(lines, src.language, flaw.start_line, flaw.end_line)
+                    results.append(
+                        Finding(
+                            id=new_id(), scan_id=scan.id, kind="ai", rule_id="AI-LOGIC", title=flaw.title,
+                            message=flaw.message or "Faille logique détectée par la revue IA du fichier.",
+                            fix_hint="Voir le correctif proposé par l'IA.",
+                            language=src.language, file=src.path,
+                            start_line=flaw.start_line, end_line=flaw.end_line,
+                            snippet=excerpt.code, snippet_start_line=excerpt.start_line,
+                            cwe=flaw.cwe, owasp=owasp_for(flaw.cwe),
+                            raw_severity=flaw.severity, severity=flaw.severity,
+                            fingerprint=_fingerprint("AI", src.path, flaw.cwe or "", _normalize(lines[flaw.start_line - 1])),
+                        )
+                    )
+                self._progress(scan, f"Revue logique par l'IA ({done}/{len(sources)})", 0.4 + 0.1 * done / len(sources))
+        return results
+
+    def _enrich(self, scan: Scan, findings: list[Finding], redacted: dict, enricher: Enricher) -> None:
         todo = [f for f in findings if f.status == "open"]
         if not todo:
             return
-        enricher = Enricher(self.settings, self.storage)
         headers = {path: file_header(src.content.split("\n")) for path, src in redacted.items()}
-        self._progress(scan, f"Enrichissement IA (0/{len(todo)})", 0.45)
+        self._progress(scan, f"Enrichissement IA (0/{len(todo)})", 0.5)
 
         def work(f: Finding):
             if f.kind == "dependency":
@@ -228,7 +292,7 @@ class ScanService:
                     log.exception("Enrichissement IA de %s échoué", f.id)
                     f.ai_error = f"Erreur IA : {exc}"
                     errors += 1
-                self._progress(scan, f"Enrichissement IA ({done}/{len(todo)})", 0.45 + 0.5 * done / len(todo))
+                self._progress(scan, f"Enrichissement IA ({done}/{len(todo)})", 0.5 + 0.45 * done / len(todo))
         scan.summary.ai_calls = enricher.stats.calls
         scan.summary.ai_cache_hits = enricher.stats.cache_hits
         scan.summary.ai_tokens = enricher.stats.tokens
@@ -244,12 +308,19 @@ class ScanService:
         scan.new_findings = len(now - before)
         scan.fixed_findings = len(before - now)
 
+    def refresh_scan(self, scan: Scan) -> None:
+        """Recalcule synthèse et score après une action utilisateur (ex. alerte ignorée)."""
+        findings = self.storage.list_findings(scan.id)
+        self._summarize(scan, findings)
+        scan.score = project_score(findings)
+        self.storage.save_scan(scan)
+
     def _summarize(self, scan: Scan, findings: list[Finding]) -> None:
         s = scan.summary
         visible = [f for f in findings if f.status == "open"]
         s.total = len(visible)
         s.by_severity = {sev.value: sum(1 for f in visible if f.severity == sev) for sev in Severity}
-        s.by_kind = {k: sum(1 for f in visible if f.kind == k) for k in ("sast", "secret", "dependency")}
+        s.by_kind = {k: sum(1 for f in visible if f.kind == k) for k in ("sast", "ai", "secret", "dependency")}
         by_owasp: dict[str, int] = {}
         for f in visible:
             if f.owasp:

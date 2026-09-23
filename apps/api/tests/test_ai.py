@@ -24,6 +24,18 @@ def test_unified_diff_uses_file_line_numbers():
 
 def _fake_complete(self, prompt: str) -> dict:
     """Simule Claude : écarte la requête construite avec une constante, confirme le reste."""
+    if prompt.startswith("Revue de logique"):
+        if "backend-python/app.py" not in prompt:
+            return {"findings": []}
+        lines = prompt.split("\n")
+        target = next(int(line.split("|")[0]) for line in lines if 'FROM invoices WHERE id = ?' in line)
+        return {"findings": [
+            {"title": "Accès à la facture d'un autre client (IDOR)", "cwe": "CWE-639", "severity": "high",
+             "start_line": target, "end_line": target + 1, "confidence": 0.9,
+             "message": "La facture est renvoyée sans vérifier qu'elle appartient à l'utilisateur connecté."},
+            {"title": "Hypothèse peu sûre", "cwe": "CWE-000", "severity": "low",
+             "start_line": 1, "end_line": 1, "confidence": 0.3, "message": "Spéculatif."},
+        ]}
     if "Dépendance vulnérable" in prompt:
         return {"definition": "Version obsolète.", "attack_scenario": "Conceptuel.", "business_impact": "Fuite.",
                 "difficulty": "facile", "fix_explanation": "Mettre à jour.", "best_practices": ["Renovate"]}
@@ -58,6 +70,14 @@ def test_pipeline_with_ai(monkeypatch, service):
 
     # Les secrets ne sont jamais écartés par l'IA, et restent masqués dans ce qui lui est envoyé
     assert all(f.status == "open" for f in findings if f.kind == "secret")
+
+    # Revue logique : l'IDOR est ajouté (et validé comme les autres), le résultat à faible confiance est ignoré
+    logic = [f for f in findings if f.kind == "ai"]
+    assert len(logic) == 1
+    idor = logic[0]
+    assert idor.cwe == "CWE-639" and idor.owasp and idor.owasp.startswith("A01")
+    assert "def get_invoice" in idor.snippet and idor.ai and idor.ai.verdict == "true_positive"
+    assert scan.summary.by_kind["ai"] == 1
 
 
 def test_prompt_never_contains_secret(monkeypatch, service, tmp_path):

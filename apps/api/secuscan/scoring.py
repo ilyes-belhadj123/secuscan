@@ -30,9 +30,9 @@ def apply_severity(finding: Finding) -> None:
     if _TEST_PATH.search(finding.file):
         severity = downgrade(severity)
     ai = finding.ai
-    # Seules les alertes de règles statiques peuvent être écartées par l'IA : un secret masqué
+    # Seules les alertes de code (règles ou revue IA) peuvent être écartées par l'IA : un secret masqué
     # ou une version vulnérable reste un fait, quel que soit le contexte.
-    if ai and finding.kind == "sast":
+    if ai and finding.kind in ("sast", "ai"):
         if ai.verdict == "false_positive" and ai.confidence >= FALSE_POSITIVE_CONFIDENCE:
             if finding.status == "open":
                 finding.status = "false_positive"

@@ -18,7 +18,8 @@ class Severity(StrEnum):
 
 SEVERITY_ORDER = {Severity.critical: 0, Severity.high: 1, Severity.medium: 2, Severity.low: 3}
 
-FindingKind = Literal["sast", "secret", "dependency"]
+# "ai" : faille logique détectée par la revue IA d'un fichier (aucune règle ne la couvre)
+FindingKind = Literal["sast", "ai", "secret", "dependency"]
 FindingStatus = Literal["open", "dismissed", "false_positive"]
 ScanStatus = Literal["queued", "running", "completed", "failed"]
 
@@ -124,7 +125,8 @@ class ScanSummary(BaseModel):
 class Scan(BaseModel):
     id: str
     project_name: str
-    source: Literal["upload", "snippet", "demo"]
+    source: Literal["upload", "snippet", "demo", "git"]
+    source_url: str | None = None
     status: ScanStatus = "queued"
     stage: str = "En attente"
     progress: float = 0.0
@@ -143,6 +145,12 @@ class SnippetRequest(BaseModel):
     project_name: str = Field(default="Extrait de code", max_length=120)
     filename: str = Field(max_length=200)
     code: str = Field(max_length=500_000)
+
+
+class GitRequest(BaseModel):
+    url: str = Field(max_length=300)
+    branch: str | None = Field(default=None, max_length=100)
+    project_name: str | None = Field(default=None, max_length=120)
 
 
 class DismissRequest(BaseModel):

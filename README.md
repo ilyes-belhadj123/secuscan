@@ -25,10 +25,16 @@ cd apps/web; npm install; npm run dev
 ## Mode « live + cache » : préparer la démo
 
 Chaque réponse de l'IA et de la base de vulnérabilités OSV est mise en cache dans
-`apps/api/data/secuscan.db`. **La veille de la démo, lancez une fois l'analyse d'Acme Shop
-avec la clé et le réseau** : le jour J, la même analyse est instantanée et fonctionne même
-si le réseau ou l'API tombe. Le code collé en direct pendant la démo passe, lui, par l'IA
-en temps réel.
+`apps/api/data/secuscan.db`. **La veille de la démo**, avec la clé et le réseau :
+
+```powershell
+cd apps/api; uv run python -m secuscan.prepare_demo
+```
+
+La commande teste la connexion à l'IA (clé + identifiant du modèle), analyse Acme Shop pour
+remplir le cache et affiche un bilan (`[OK] Démo prête`). Le jour J, la même analyse est
+instantanée et fonctionne même si le réseau ou l'API tombe. Le code collé ou le dépôt Git
+analysé en direct passent, eux, par l'IA en temps réel.
 
 Sans clé et sans cache, l'outil reste utilisable : les alertes s'affichent avec l'explication
 et le correctif génériques de la règle.
@@ -44,10 +50,14 @@ et le correctif génériques de la règle.
    explique pourquoi elle n'est pas exploitable.
 4. **Injection SQL** (`app.py:30`) : onglets Comprendre → Corriger (diff, « Copier le code
    corrigé »). Flèches ← → pour passer d'une faille à l'autre.
-5. **Secret exposé** : la valeur n'est jamais affichée, stockée ni envoyée à l'IA.
-6. **Ignorer une alerte** avec justification : elle reste masquée aux analyses suivantes.
-7. **Coller du code** du client (ou l'exemple fourni) : analyse IA en direct.
-8. **Rapport PDF** à transmettre, et export JSON (schéma : `/api/schemas/report-v1.json`).
+5. **Faille logique trouvée par l'IA seule** : filtre « Logique (IA) ». Accès à la facture
+   d'un autre client (IDOR, `app.py` → `get_invoice`) et prix fourni par le client au
+   paiement (`server.js` → `/api/checkout`) : aucune règle par motif ne peut les voir.
+6. **Secret exposé** : la valeur n'est jamais affichée, stockée ni envoyée à l'IA.
+7. **Ignorer une alerte** avec justification : elle reste masquée aux analyses suivantes.
+8. **Analyse en direct** : coller du code du client, ou l'URL d'un dépôt Git public
+   (ex. `https://github.com/OWASP/NodeGoat`).
+9. **Rapport PDF** à transmettre, et export JSON (schéma : `/api/schemas/report-v1.json`).
 
 ## Architecture
 
@@ -67,7 +77,7 @@ Documents de cadrage (cahier des charges, backlog, tickets) : `docs/`.
 Simplifications propres à la démo, à reprendre ensuite (voir `docs/03_tickets_securite_code.md`) :
 SQLite au lieu de MongoDB, tâches en thread au lieu d'ARQ/Redis, pas de sandbox Docker
 (SS-4 ; le code analysé n'est jamais exécuté), pas d'authentification ni de multi-tenant
-(SS-2), pas d'OAuth GitHub (SS-17), moteur de règles maison au lieu d'un moteur SAST open
+(SS-2), dépôts Git publics uniquement, sans OAuth GitHub (SS-17), moteur de règles maison au lieu d'un moteur SAST open
 source (SS-5 : l'adaptateur est prévu dans `analyzers/sast.py`).
 
 ## Tests

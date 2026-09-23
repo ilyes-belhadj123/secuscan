@@ -142,6 +142,15 @@ export default function FindingPage() {
         </div>
         <h1>{finding.title}</h1>
         <div className="mono secondary small">{finding.file}:{finding.start_line}</div>
+        {finding.kind === "ai" && (
+          <div className="ai-note">
+            <span aria-hidden>✦</span>
+            <span>
+              <strong>Détectée par la revue IA du fichier.</strong> Aucune règle statique ne couvre ce type de faille
+              logique : elle a été confirmée par une seconde analyse du contexte.
+            </span>
+          </div>
+        )}
         {finding.status === "false_positive" && ai && (
           <div className="ai-note"><span aria-hidden>✕</span><span><strong>Écartée par l'IA :</strong> {ai.reason}</span></div>
         )}

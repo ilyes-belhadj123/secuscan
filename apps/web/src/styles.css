@@ -154,7 +154,7 @@ label.field { display: flex; flex-direction: column; gap: 4px; font-weight: 600;
   width: 52px; height: 52px; border-radius: 12px; display: grid; place-items: center;
   font-size: 26px; font-weight: 800; border: 2px solid var(--border);
 }
-.kpis { display: grid; grid-template-columns: repeat(5, 1fr); gap: 12px; }
+.kpis { display: grid; grid-template-columns: repeat(6, 1fr); gap: 12px; }
 @media (max-width: 900px) { .kpis { grid-template-columns: repeat(2, 1fr); } }
 .kpi { background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius); padding: 14px 16px; }
 .kpi .label { font-size: 12px; color: var(--text-2); font-weight: 600; }
@@ -191,7 +191,7 @@ tr.faded td { opacity: 0.6; }
 .code-view .file { padding: 8px 12px; border-bottom: 1px solid var(--border); font-size: 12px; color: var(--text-2); background: var(--surface); }
 .code-view table { border-collapse: collapse; width: 100%; }
 .code-view td { padding: 0 12px; white-space: pre-wrap; overflow-wrap: anywhere; }
-.code-view td.ln { color: var(--muted); text-align: right; user-select: none; width: 1%; padding-right: 8px; }
+.code-view td.ln { color: var(--muted); text-align: right; user-select: none; width: 1%; padding-right: 8px; white-space: nowrap; vertical-align: top; }
 .code-view tr.hl td { background: var(--code-hl); }
 .code-view tr.hl td.ln { color: var(--sev-critical); font-weight: 700; }
 .diff-view .add td { background: var(--add-bg); }

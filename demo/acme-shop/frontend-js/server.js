@@ -38,4 +38,11 @@ app.post("/api/pricing/rule", (req, res) => {
   res.json({ result: rule });
 });
 
+app.post("/api/checkout", async (req, res) => {
+  const { productId, quantity, unitPrice } = req.body;
+  const total = quantity * unitPrice;
+  await db.query("INSERT INTO orders (product_id, quantity, total) VALUES ($1, $2, $3)", [productId, quantity, total]);
+  res.json({ status: "paid", total });
+});
+
 app.listen(3000);

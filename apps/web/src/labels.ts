@@ -19,6 +19,7 @@ export const SEVERITY_ICON: Record<Severity, string> = {
 
 export const KIND_LABEL: Record<FindingKind, string> = {
   sast: "Code",
+  ai: "Logique (IA)",
   secret: "Secret",
   dependency: "Dépendance",
 };

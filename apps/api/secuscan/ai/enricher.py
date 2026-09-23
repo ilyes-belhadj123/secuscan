@@ -18,10 +18,11 @@ from dataclasses import dataclass
 import httpx
 
 from ..config import Settings
-from ..models import AIReview, Explanation, Finding, FixSuggestion
+from ..ingest import SourceFile
+from ..models import AIReview, Explanation, Finding, FixSuggestion, Severity
 from ..storage import Storage
 from ..taxonomy import references_for
-from .prompts import DEPENDENCY_TEMPLATE, FINDING_TEMPLATE, PROMPT_VERSION, SYSTEM_PROMPT
+from .prompts import DEPENDENCY_TEMPLATE, FINDING_TEMPLATE, LOGIC_TEMPLATE, PROMPT_VERSION, SYSTEM_PROMPT
 from .safety import sanitize
 
 log = logging.getLogger(__name__)
@@ -29,6 +30,20 @@ log = logging.getLogger(__name__)
 
 class AIUnavailable(RuntimeError):
     pass
+
+
+LOGIC_MIN_CONFIDENCE = 0.7
+
+
+@dataclass
+class LogicFlaw:
+    title: str
+    cwe: str | None
+    severity: Severity
+    start_line: int
+    end_line: int
+    confidence: float
+    message: str
 
 
 @dataclass
@@ -188,6 +203,36 @@ class Enricher:
             explanation=explanation, fix=fix, model=self.settings.openrouter_model,
             cached=bool(data.get("_cached")), filtered=filtered,
         )
+
+    # ------------------------------------------------------------------ failles logiques
+    def discover_logic_flaws(self, source: SourceFile, flagged_lines: list[int]) -> list[LogicFlaw]:
+        """Revue d'un fichier complet : failles que les règles par motif ne couvrent pas."""
+        lines = source.content.split("\n")
+        numbered = "\n".join(f"{i:>4} | {line}" for i, line in enumerate(lines, start=1))
+        prompt = LOGIC_TEMPLATE.format(
+            file=source.path, language=source.language, numbered=numbered,
+            flagged=", ".join(map(str, sorted(set(flagged_lines)))) or "aucune",
+        )
+        data = self._complete(prompt)
+        flaws = []
+        for item in (data.get("findings") or [])[:5]:
+            try:
+                start = int(item["start_line"])
+                end = max(start, int(item.get("end_line", start)))
+                confidence = float(item.get("confidence", 0))
+                severity = Severity(str(item.get("severity", "medium")).lower())
+            except (KeyError, TypeError, ValueError):
+                continue
+            cwe = str(item.get("cwe", "")).upper()
+            if not (1 <= start <= len(lines)) or confidence < LOGIC_MIN_CONFIDENCE:
+                continue
+            title, _ = sanitize(str(item.get("title") or "Faille logique").strip())
+            message, _ = sanitize(str(item.get("message") or "").strip())
+            flaws.append(LogicFlaw(
+                title=title[:120], cwe=cwe if re.fullmatch(r"CWE-\d+", cwe) else None, severity=severity,
+                start_line=start, end_line=min(end, start + 15, len(lines)), confidence=confidence, message=message,
+            ))
+        return flaws
 
     # ------------------------------------------------------------------ dépendances
     def review_dependency(self, finding: Finding) -> AIReview:

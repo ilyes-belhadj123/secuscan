@@ -7,7 +7,7 @@ import subprocess
 
 import requests
 import yaml
-from flask import Flask, jsonify, render_template_string, request, send_file
+from flask import Flask, abort, jsonify, render_template_string, request, send_file, session
 
 app = Flask(__name__)
 
@@ -80,6 +80,28 @@ def hash_password(password):
 
 def fetch_exchange_rates():
     return requests.get("https://rates.example.com/eur", verify=False).json()
+
+
+def login_required(view):
+    def wrapper(*args, **kwargs):
+        if "user_id" not in session:
+            abort(401)
+        return view(*args, **kwargs)
+
+    wrapper.__name__ = view.__name__
+    return wrapper
+
+
+@app.route("/api/invoices/<int:invoice_id>")
+@login_required
+def get_invoice(invoice_id):
+    db = get_db()
+    row = db.execute(
+        "SELECT id, customer_id, amount, billing_address FROM invoices WHERE id = ?", (invoice_id,)
+    ).fetchone()
+    if row is None:
+        abort(404)
+    return jsonify({"id": row[0], "customer_id": row[1], "amount": row[2], "billing_address": row[3]})
 
 
 if __name__ == "__main__":

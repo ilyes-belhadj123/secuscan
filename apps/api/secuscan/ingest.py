@@ -1,6 +1,9 @@
 """Import du code : extraction ZIP sécurisée, détection des langages, collecte des fichiers."""
+import os
+import re
 import shutil
 import stat
+import subprocess
 import tempfile
 import zipfile
 from dataclasses import dataclass
@@ -152,6 +155,51 @@ def language_for_filename(filename: str) -> str | None:
     return LANGUAGE_BY_EXTENSION.get(Path(filename).suffix.lower())
 
 
+GIT_URL = re.compile(
+    r"^https://(github\.com|gitlab\.com)/[A-Za-z0-9_.-]+(/[A-Za-z0-9_.-]+){1,3}?(\.git)?/?$"
+)
+GIT_BRANCH = re.compile(r"^[A-Za-z0-9._/-]{1,100}$")
+CLONE_TIMEOUT_SECONDS = 120
+
+
+def validate_git_url(url: str, branch: str | None) -> str:
+    url = url.strip()
+    if not GIT_URL.match(url) or ".." in url:
+        raise UploadError("URL non supportée : dépôt public https://github.com/… ou https://gitlab.com/… uniquement.")
+    if branch and (not GIT_BRANCH.match(branch) or branch.startswith("-") or ".." in branch):
+        raise UploadError("Nom de branche invalide.")
+    return url.rstrip("/")
+
+
+def clone_repository(url: str, branch: str | None, dest: Path, settings: Settings) -> None:
+    """Clone superficiel d'un dépôt public, sans hooks, LFS, sous-modules ni invite d'identifiants."""
+    if not shutil.which("git"):
+        raise UploadError("git n'est pas installé sur le serveur d'analyse.")
+    cmd = [
+        "git", "-c", "core.hooksPath=/dev/null", "-c", "core.symlinks=false", "-c", "protocol.file.allow=never",
+        "-c", "credential.helper=", "clone", "--depth", "1", "--single-branch", "--no-tags",
+    ]
+    if branch:
+        cmd += ["--branch", branch]
+    cmd += ["--", url, str(dest)]
+    env = {**os.environ, "GIT_TERMINAL_PROMPT": "0", "GIT_LFS_SKIP_SMUDGE": "1", "GCM_INTERACTIVE": "never"}
+    try:
+        result = subprocess.run(cmd, capture_output=True, text=True, timeout=CLONE_TIMEOUT_SECONDS, env=env)
+    except subprocess.TimeoutExpired as exc:
+        raise UploadError("Le clonage du dépôt a dépassé le délai autorisé.") from exc
+    if result.returncode != 0:
+        detail = result.stderr.strip().splitlines()[-1] if result.stderr.strip() else ""
+        if "not found" in detail.lower() or "could not read" in detail.lower() or "authentication" in detail.lower():
+            raise UploadError("Dépôt introuvable ou privé (seuls les dépôts publics sont pris en charge pour l'instant).")
+        if "remote branch" in detail.lower():
+            raise UploadError(f"Branche introuvable : {branch}")
+        raise UploadError(f"Échec du clonage du dépôt : {detail[:200]}")
+    remove_tree(dest / ".git")
+    total = sum(p.stat().st_size for p in dest.rglob("*") if p.is_file() and not p.is_symlink())
+    if total > settings.max_uncompressed_bytes:
+        raise UploadError("Dépôt trop volumineux pour la démo (500 Mo maximum).")
+
+
 class Workspace:
     """Répertoire temporaire d'analyse, supprimé en fin de scan."""
 
@@ -160,4 +208,18 @@ class Workspace:
         self.path = Path(tempfile.mkdtemp(prefix="scan-", dir=base))
 
     def cleanup(self) -> None:
-        shutil.rmtree(self.path, ignore_errors=True)
+        remove_tree(self.path)
+
+
+def remove_tree(path: Path) -> None:
+    """Suppression récursive robuste (les objets git sont en lecture seule sous Windows)."""
+
+    def force(func, target, _exc):
+        try:
+            os.chmod(target, stat.S_IWRITE)
+            func(target)
+        except OSError:
+            pass
+
+    if path.exists():
+        shutil.rmtree(path, onexc=force)

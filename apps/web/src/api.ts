@@ -1,5 +1,5 @@
 export type Severity = "critical" | "high" | "medium" | "low";
-export type FindingKind = "sast" | "secret" | "dependency";
+export type FindingKind = "sast" | "ai" | "secret" | "dependency";
 export type FindingStatus = "open" | "dismissed" | "false_positive";
 
 export interface Explanation {
@@ -94,7 +94,8 @@ export interface ScanSummary {
 export interface Scan {
   id: string;
   project_name: string;
-  source: "upload" | "snippet" | "demo";
+  source: "upload" | "snippet" | "demo" | "git";
+  source_url: string | null;
   status: "queued" | "running" | "completed" | "failed";
   stage: string;
   progress: number;
@@ -114,6 +115,13 @@ export interface HistoryPoint {
   created_at: string;
   score: number;
   total: number;
+}
+
+export interface AuditEntry {
+  ts: string;
+  action: string;
+  target: string;
+  details: Record<string, string | number | null>;
 }
 
 export interface Health {
@@ -159,9 +167,18 @@ export const api = {
     form.append("project_name", projectName);
     return request<Scan>("/api/scans/upload", { method: "POST", body: form });
   },
+  git: (url: string, branch: string, projectName: string) =>
+    request<Scan>("/api/scans/git", json({ url, branch: branch || null, project_name: projectName || null })),
   snippet: (filename: string, code: string, projectName: string) =>
     request<Scan>("/api/scans/snippet", json({ filename, code, project_name: projectName })),
   dismiss: (id: string, reason: string, justification: string) =>
     request<Finding>(`/api/findings/${id}/dismiss`, json({ reason, justification })),
-  reportUrl: (id: string, format: "pdf" | "json") => `/api/scans/${id}/report.${format}`,
+  audit: () => request<AuditEntry[]>("/api/audit"),
+  reportUrl: (id: string, format: "pdf" | "json", options?: { preparedFor?: string; preparedBy?: string }) => {
+    const params = new URLSearchParams();
+    if (options?.preparedFor?.trim()) params.set("prepared_for", options.preparedFor.trim());
+    if (options?.preparedBy?.trim()) params.set("prepared_by", options.preparedBy.trim());
+    const query = params.toString();
+    return `/api/scans/${id}/report.${format}${query ? `?${query}` : ""}`;
+  },
 };

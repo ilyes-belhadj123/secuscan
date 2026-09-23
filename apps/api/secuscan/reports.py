@@ -31,7 +31,7 @@ SEVERITY_COLORS = {
     "medium": colors.HexColor("#B54708"),
     "low": colors.HexColor("#475467"),
 }
-KIND_LABELS = {"sast": "Code", "secret": "Secret", "dependency": "Dépendance"}
+KIND_LABELS = {"sast": "Code", "ai": "Logique (IA)", "secret": "Secret", "dependency": "Dépendance"}
 INK = colors.HexColor("#101828")
 MUTED = colors.HexColor("#667085")
 LINE = colors.HexColor("#EAECF0")
@@ -41,7 +41,7 @@ BRAND = colors.HexColor("#1D4ED8")
 def _styles():
     base = getSampleStyleSheet()
     return {
-        "title": ParagraphStyle("t", parent=base["Title"], fontSize=20, textColor=INK, spaceAfter=4),
+        "title": ParagraphStyle("t", parent=base["Title"], fontSize=20, textColor=INK, spaceAfter=4, alignment=0),
         "subtitle": ParagraphStyle("st", parent=base["Normal"], fontSize=10, textColor=MUTED),
         "h2": ParagraphStyle("h2", parent=base["Heading2"], fontSize=13, textColor=INK, spaceBefore=10),
         "h3": ParagraphStyle("h3", parent=base["Heading3"], fontSize=11, textColor=INK, spaceAfter=2),
@@ -58,34 +58,48 @@ def _p(text: str, style) -> Paragraph:
     return Paragraph(escape(text or "").replace("\n", "<br/>"), style)
 
 
-def _footer(canvas, doc):
-    canvas.saveState()
-    canvas.setFont("Helvetica", 7.5)
-    canvas.setFillColor(MUTED)
-    canvas.drawString(18 * mm, 10 * mm, "SecuScan — rapport confidentiel")
-    canvas.drawRightString(A4[0] - 18 * mm, 10 * mm, f"Page {doc.page}")
-    canvas.restoreState()
+def _footer(label: str):
+    def draw(canvas, doc):
+        canvas.saveState()
+        canvas.setFont("Helvetica", 7.5)
+        canvas.setFillColor(MUTED)
+        canvas.drawString(18 * mm, 10 * mm, f"{label} — rapport confidentiel")
+        canvas.drawRightString(A4[0] - 18 * mm, 10 * mm, f"Page {doc.page}")
+        canvas.restoreState()
+
+    return draw
 
 
 def _sorted(findings: list[Finding]) -> list[Finding]:
     return sorted(findings, key=lambda f: (SEVERITY_ORDER[f.severity], f.file, f.start_line))
 
 
-def build_pdf(scan: Scan, findings: list[Finding]) -> bytes:
+def build_pdf(
+    scan: Scan, findings: list[Finding], prepared_for: str | None = None, prepared_by: str | None = None
+) -> bytes:
+    """Rapport PDF. `prepared_by` renseigné = marque blanche : le nom de l'ESN remplace SecuScan."""
     st = _styles()
     buf = io.BytesIO()
+    brand = prepared_by or "SecuScan"
     doc = SimpleDocTemplate(
         buf, pagesize=A4, leftMargin=18 * mm, rightMargin=18 * mm, topMargin=16 * mm, bottomMargin=18 * mm,
-        title=f"Rapport SecuScan — {scan.project_name}", author="SecuScan",
+        title=f"Rapport d'analyse de sécurité — {scan.project_name}", author=brand,
     )
     open_findings = _sorted([f for f in findings if f.status == "open"])
     date = datetime.fromisoformat(scan.completed_at or scan.created_at).strftime("%d/%m/%Y %H:%M")
     s = scan.summary
-    story = [
+    story = []
+    if prepared_by:
+        story.append(Paragraph(f"<font color='#1D4ED8'><b>{escape(prepared_by)}</b></font>", st["h3"]))
+    story += [
         _p("Rapport d'analyse de sécurité", st["title"]),
         _p(f"Projet : {scan.project_name}  ·  Analyse du {date} (UTC)  ·  Réf. {scan.id}", st["subtitle"]),
-        Spacer(1, 8 * mm),
     ]
+    if prepared_for or prepared_by:
+        parts = ([f"Préparé pour : {prepared_for}"] if prepared_for else []) + (
+            [f"Réalisé par : {prepared_by}"] if prepared_by else [])
+        story.append(_p("  ·  ".join(parts), st["subtitle"]))
+    story.append(Spacer(1, 8 * mm))
 
     # Synthèse : score + répartition
     score = scan.score if scan.score is not None else 0
@@ -204,7 +218,8 @@ def build_pdf(scan: Scan, findings: list[Finding]) -> bytes:
     story += [Spacer(1, 6 * mm), _p(
         "Les correctifs sont des suggestions générées automatiquement : ils doivent être relus et testés "
         "avant intégration. Aucune valeur de secret n'apparaît dans ce rapport.", st["small"])]
-    doc.build(story, onFirstPage=_footer, onLaterPages=_footer)
+    footer = _footer(brand)
+    doc.build(story, onFirstPage=footer, onLaterPages=footer)
     return buf.getvalue()
 
 

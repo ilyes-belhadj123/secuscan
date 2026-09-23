@@ -3,12 +3,19 @@ import logging
 import re
 from pathlib import Path
 
-from fastapi import Depends, FastAPI, File, Form, HTTPException, UploadFile
+from fastapi import Depends, FastAPI, File, Form, HTTPException, Query, UploadFile
 from fastapi.responses import JSONResponse, Response
 
 from .config import DEMO_PROJECT_DIR, Settings, get_settings
-from .ingest import UploadError, Workspace, language_for_filename, safe_extract_zip
-from .models import SEVERITY_ORDER, DismissRequest, Finding, Scan, SnippetRequest
+from .ingest import (
+    UploadError,
+    Workspace,
+    clone_repository,
+    language_for_filename,
+    safe_extract_zip,
+    validate_git_url,
+)
+from .models import SEVERITY_ORDER, DismissRequest, Finding, GitRequest, Scan, SnippetRequest
 from .pipeline import ScanService, new_id
 from .reports import build_json, build_pdf, report_json_schema
 from .storage import Storage
@@ -99,6 +106,27 @@ async def scan_upload(
     return scan
 
 
+@app.post("/api/scans/git", status_code=202)
+def scan_git(body: GitRequest, service: ScanService = Depends(get_service)):
+    try:
+        url = validate_git_url(body.url, body.branch)
+    except UploadError as exc:
+        raise HTTPException(400, str(exc)) from exc
+    branch = (body.branch or "").strip() or None
+    repo_name = url.removesuffix(".git").split("/")[-1]
+    workspace = Workspace(service.settings.data_dir / "work")
+    source_dir = workspace.path / "src"
+    scan = Scan(
+        id=new_id(), project_name=(body.project_name or "").strip() or repo_name, source="git",
+        source_url=url + (f"@{branch}" if branch else ""),
+    )
+    service.submit(
+        scan, source_dir, workspace,
+        prepare=("Clonage du dépôt", lambda: clone_repository(url, branch, source_dir, service.settings)),
+    )
+    return scan
+
+
 @app.post("/api/scans/snippet", status_code=202)
 def scan_snippet(body: SnippetRequest, service: ScanService = Depends(get_service)):
     filename = Path(body.filename.replace("\\", "/")).name
@@ -160,7 +188,11 @@ def dismiss_finding(finding_id: str, body: DismissRequest, service: ScanService 
     finding.dismiss_reason, finding.dismiss_justification = body.reason, body.justification.strip()
     service.storage.save_findings([finding])
     service.storage.save_dismissal(scan.project_name, finding.fingerprint, body.reason, finding.dismiss_justification)
-    service.storage.audit("finding.dismissed", finding.id, {"reason": body.reason, "rule": finding.rule_id})
+    service.refresh_scan(scan)
+    service.storage.audit("finding.dismissed", finding.id, {
+        "project": scan.project_name, "title": finding.title, "location": f"{finding.file}:{finding.start_line}",
+        "reason": body.reason, "justification": finding.dismiss_justification,
+    })
     return finding
 
 
@@ -171,12 +203,22 @@ def audit_log(service: ScanService = Depends(get_service)):
 
 # ---------------------------------------------------------------------- rapports
 @app.get("/api/scans/{scan_id}/report.pdf")
-def report_pdf(scan_id: str, service: ScanService = Depends(get_service)):
+def report_pdf(
+    scan_id: str,
+    prepared_for: str | None = Query(None, max_length=120),
+    prepared_by: str | None = Query(None, max_length=120),
+    service: ScanService = Depends(get_service),
+):
     scan = _scan_or_404(service, scan_id)
     if scan.status != "completed":
         raise HTTPException(409, "L'analyse n'est pas terminée")
-    pdf = build_pdf(scan, service.storage.list_findings(scan_id))
-    service.storage.audit("report.exported", scan_id, {"format": "pdf"})
+    prepared_for = (prepared_for or "").strip() or None
+    prepared_by = (prepared_by or "").strip() or None
+    pdf = build_pdf(scan, service.storage.list_findings(scan_id), prepared_for, prepared_by)
+    service.storage.audit(
+        "report.exported", scan_id,
+        {"format": "pdf", "project": scan.project_name, "prepared_for": prepared_for, "prepared_by": prepared_by},
+    )
     name = _safe_filename(f"secuscan-{scan.project_name}-{scan.id}") + ".pdf"
     return Response(pdf, media_type="application/pdf", headers={"Content-Disposition": f'attachment; filename="{name}"'})
 
@@ -186,7 +228,7 @@ def report_json(scan_id: str, service: ScanService = Depends(get_service)):
     scan = _scan_or_404(service, scan_id)
     if scan.status != "completed":
         raise HTTPException(409, "L'analyse n'est pas terminée")
-    service.storage.audit("report.exported", scan_id, {"format": "json"})
+    service.storage.audit("report.exported", scan_id, {"format": "json", "project": scan.project_name})
     name = _safe_filename(f"secuscan-{scan.project_name}-{scan.id}") + ".json"
     return JSONResponse(
         build_json(scan, service.storage.list_findings(scan_id)),

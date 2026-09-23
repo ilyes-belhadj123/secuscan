@@ -52,8 +52,13 @@ def enclosing_excerpt(lines: list[str], language: str, start: int, end: int) -> 
         top = max(1, start - 8)
 
     bottom = end
+    # Python : si l'extrait démarre en colonne 0 (fonction de premier niveau), la première
+    # instruction non indentée qui suit marque la fin du bloc.
+    block_at_col0 = language == "python" and not lines[top - 1][:1].isspace()
     for i in range(end + 1, min(n, end + MAX_AFTER) + 1):
-        if _is_start(language, lines[i - 1]) and i > end + 1:
+        line = lines[i - 1]
+        dedented = block_at_col0 and line[:1] not in ("", " ", "\t", "#", ")", "]", "}")
+        if (_is_start(language, line) or dedented) and i > end + 1:
             bottom = i - 1
             break
         bottom = i

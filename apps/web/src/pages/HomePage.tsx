@@ -29,6 +29,8 @@ export default function HomePage({ health }: { health: Health | null }) {
   const [projectName, setProjectName] = useState("");
   const [code, setCode] = useState(SNIPPET_EXAMPLE);
   const [ext, setExt] = useState("py");
+  const [gitUrl, setGitUrl] = useState("");
+  const [gitBranch, setGitBranch] = useState("");
   const fileInput = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
@@ -71,7 +73,7 @@ export default function HomePage({ health }: { health: Health | null }) {
 
       {error && <div className="card error">{error}</div>}
 
-      <section className="grid-3">
+      <section className="grid-2">
         <div className="card import-card">
           <span className="icon" aria-hidden>🛒</span>
           <h2>Projet de démonstration</h2>
@@ -87,6 +89,38 @@ export default function HomePage({ health }: { health: Health | null }) {
             {busy === "demo" ? <span className="spinner" /> : "▶"} Analyser Acme Shop
           </button>
         </div>
+
+        <form
+          className="card import-card"
+          onSubmit={(e) => {
+            e.preventDefault();
+            launch("git", () => api.git(gitUrl.trim(), gitBranch.trim(), ""));
+          }}
+        >
+          <span className="icon" aria-hidden>🔗</span>
+          <h2>Analyser un dépôt Git public</h2>
+          <label className="field">
+            URL du dépôt GitHub ou GitLab
+            <input
+              value={gitUrl}
+              onChange={(e) => setGitUrl(e.target.value)}
+              placeholder="https://github.com/organisation/projet"
+              inputMode="url"
+            />
+          </label>
+          <div className="row" style={{ flexWrap: "nowrap" }}>
+            <input
+              value={gitBranch}
+              onChange={(e) => setGitBranch(e.target.value)}
+              placeholder="Branche (par défaut)"
+              aria-label="Branche"
+            />
+            <button className="btn btn-primary" type="submit" disabled={!!busy || !gitUrl.trim()} style={{ whiteSpace: "nowrap" }}>
+              {busy === "git" ? <span className="spinner" /> : "▶"} Cloner et analyser
+            </button>
+          </div>
+          <div className="small muted">Clone superficiel, sans exécution du code, supprimé après analyse.</div>
+        </form>
 
         <div className="card import-card">
           <span className="icon" aria-hidden>📦</span>

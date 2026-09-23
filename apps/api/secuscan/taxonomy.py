@@ -17,6 +17,26 @@ OWASP_2025 = {
 
 CWE_TO_OWASP = {
     "CWE-22": "A01",
+    "CWE-200": "A01",
+    "CWE-284": "A01",
+    "CWE-285": "A01",
+    "CWE-352": "A01",
+    "CWE-601": "A01",
+    "CWE-639": "A01",
+    "CWE-862": "A01",
+    "CWE-863": "A01",
+    "CWE-918": "A01",
+    "CWE-306": "A07",
+    "CWE-287": "A07",
+    "CWE-362": "A06",
+    "CWE-472": "A06",
+    "CWE-602": "A06",
+    "CWE-770": "A06",
+    "CWE-840": "A06",
+    "CWE-841": "A06",
+    "CWE-915": "A08",
+    "CWE-209": "A10",
+    "CWE-754": "A10",
     "CWE-98": "A05",
     "CWE-78": "A05",
     "CWE-79": "A05",
@@ -40,6 +60,10 @@ CWE_TO_OWASP = {
 }
 
 CWE_NAMES = {
+    "CWE-639": "Authorization Bypass Through User-Controlled Key (IDOR)",
+    "CWE-862": "Missing Authorization",
+    "CWE-602": "Client-Side Enforcement of Server-Side Security",
+    "CWE-840": "Business Logic Errors",
     "CWE-22": "Path Traversal",
     "CWE-78": "OS Command Injection",
     "CWE-79": "Cross-site Scripting",
