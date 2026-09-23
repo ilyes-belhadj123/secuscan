@@ -36,6 +36,17 @@ def test_osv_failure_is_reported(monkeypatch, service):
     assert client.errors and "3 dépendance(s)" in client.errors[0]
 
 
+def test_lockfile_supersedes_ranges():
+    package = ManifestFile("web/package.json", "package.json", json.dumps({"dependencies": {"vite": "^6.0.0"}}))
+    lock = ManifestFile("web/package-lock.json", "package-lock.json", json.dumps({
+        "lockfileVersion": 3, "packages": {"node_modules/vite": {"version": "6.4.3"}},
+    }))
+    other = ManifestFile("legacy/package.json", "package.json", json.dumps({"dependencies": {"lodash": "4.17.15"}}))
+    deps = {(d.name, d.version, d.manifest) for d in sca.parse_manifests([package, lock, other])}
+    # vite : version installée (lockfile), pas la borne basse de la plage ; sans lockfile, le manifeste reste lu
+    assert deps == {("vite", "6.4.3", "web/package-lock.json"), ("lodash", "4.17.15", "legacy/package.json")}
+
+
 def test_package_lock_v1_parsed():
     lock = {"lockfileVersion": 1, "dependencies": {
         "express": {"version": "4.13.4", "dependencies": {"qs": {"version": "6.1.0"}}},

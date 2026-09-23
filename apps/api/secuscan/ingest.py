@@ -1,4 +1,5 @@
 """Import du code : extraction ZIP sécurisée, détection des langages, collecte des fichiers."""
+import fnmatch
 import os
 import re
 import shutil
@@ -128,7 +129,20 @@ def _read_text(path: Path) -> str | None:
     return raw.decode("utf-8", errors="replace")
 
 
-def collect_codebase(root: Path, settings: Settings) -> CodeBase:
+def is_excluded(rel_path: str, patterns: list[str]) -> bool:
+    """Motifs de type glob sur le chemin relatif (« tests/* », « *.min.js », « docs/ »)."""
+    for pattern in patterns:
+        pattern = pattern.strip().lstrip("./")
+        if not pattern:
+            continue
+        if pattern.endswith("/") and (rel_path + "/").startswith(pattern):
+            return True
+        if fnmatch.fnmatch(rel_path, pattern) or fnmatch.fnmatch(rel_path, pattern.rstrip("/") + "/*"):
+            return True
+    return False
+
+
+def collect_codebase(root: Path, settings: Settings, exclude: list[str] | None = None) -> CodeBase:
     files: list[SourceFile] = []
     manifests: list[ManifestFile] = []
     root = root.resolve()
@@ -141,6 +155,8 @@ def collect_codebase(root: Path, settings: Settings) -> CodeBase:
         if path.stat().st_size > settings.max_file_bytes:
             continue
         rel = "/".join(rel_parts)
+        if exclude and is_excluded(rel, exclude):
+            continue
         if path.name in MANIFEST_FILES:
             if (content := _read_text(path)) is not None:
                 manifests.append(ManifestFile(path=rel, name=path.name, content=content))

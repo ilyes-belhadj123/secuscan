@@ -39,6 +39,26 @@ jobs:
         if: always()
         run: cat ../../benchmark/results/latest-rules.md >> "$GITHUB_STEP_SUMMARY"
 
+  # SecuScan analyse son propre code (configuration : .secuscan.yml) ; échec si alerte « élevée » ou plus
+  self-scan:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: apps/api
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v6
+      - run: uv sync
+      - name: Analyse SecuScan du dépôt
+        run: |
+          uv run python -m secuscan.cli scan ../.. --format sarif --output ../../secuscan.sarif
+          uv run python -m secuscan.cli scan ../.. --fail-on none >> "$GITHUB_STEP_SUMMARY"
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: secuscan-sarif
+          path: secuscan.sarif
+
   web:
     runs-on: ubuntu-latest
     defaults:

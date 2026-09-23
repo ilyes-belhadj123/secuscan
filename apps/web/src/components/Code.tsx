@@ -58,6 +58,7 @@ export function CodeView({ file, language, code, startLine, highlightFrom, highl
             return (
               <tr key={n} className={hl ? "hl" : undefined}>
                 <td className="ln mono">{n}</td>
+                {/* secuscan: ignore[JS-XSS] HTML produit par highlight.js ou escapeHtml, qui échappent le code */}
                 <td className="mono" dangerouslySetInnerHTML={{ __html: html }} />
               </tr>
             );
@@ -99,6 +100,7 @@ export function DiffView({ diff, file, language }: { diff: string; file: string;
               <tr key={i} className={cls}>
                 <td className="ln mono">{num}</td>
                 <td className="sign mono">{sign === " " ? "" : sign}</td>
+                {/* secuscan: ignore[JS-XSS] HTML produit par highlight.js ou escapeHtml, qui échappent le code */}
                 <td className="mono" dangerouslySetInnerHTML={{ __html: highlightLine(text, lang) }} />
               </tr>
             );

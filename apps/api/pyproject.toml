@@ -17,6 +17,7 @@ dependencies = [
     "tree-sitter-php>=0.24.1",
     "tree-sitter-java>=0.23.5",
     "email-validator>=2.3.0",
+    "pyyaml>=6.0.3",
 ]
 
 [dependency-groups]

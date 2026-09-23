@@ -157,11 +157,24 @@ PARSERS = {
 }
 
 
+# Manifeste à plages de versions → lockfile qui donne les versions réellement installées
+_LOCKFILE_FOR = {"package.json": "package-lock.json", "composer.json": "composer.lock"}
+
+
 def parse_manifests(manifests: list[ManifestFile]) -> list[Dependency]:
     seen: set[tuple[str, str, str]] = set()
     deps: list[Dependency] = []
+    paths = {m.path for m in manifests}
+
+    def superseded(m: ManifestFile) -> bool:
+        # Avec un lockfile dans le même dossier, les plages (« ^6.0.0 ») du manifeste ne disent pas
+        # quelle version est installée : seul le lockfile fait foi (sinon faux positifs)
+        lock = _LOCKFILE_FOR.get(m.name)
+        return bool(lock) and (m.path[: -len(m.name)] + lock) in paths
+
     # Les lockfiles sont plus précis : on les traite en premier
-    for m in sorted(manifests, key=lambda x: 0 if x.name.endswith(".lock") or "lock" in x.name else 1):
+    for m in sorted((m for m in manifests if not superseded(m)),
+                    key=lambda x: 0 if x.name.endswith(".lock") or "lock" in x.name else 1):
         for dep in PARSERS[m.name](m):
             key = (dep.ecosystem, dep.name.lower(), dep.version)
             if key not in seen:

@@ -94,6 +94,13 @@ cd apps/api; uv run python -m pytest -q; uv run ruff check .
 cd apps/web; npm run build
 ```
 
+Analyse en ligne de commande et en CI (SS-23) — code retour ≠ 0 au-delà du seuil, sortie SARIF,
+configuration `.secuscan.yml` : voir [docs/integration-ci.md](docs/integration-ci.md).
+
+```powershell
+cd apps/api; uv run python -m secuscan.cli scan ..\.. --fail-on high
+```
+
 Benchmark de détection (SS-8) — corpus et vérité terrain dans `benchmark/` :
 
 ```powershell

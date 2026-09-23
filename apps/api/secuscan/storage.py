@@ -138,9 +138,11 @@ class Storage:
         with self._conn() as conn:
             conn.executescript(_SCHEMA)
             for table, columns in _ADDED_COLUMNS.items():
+                # secuscan: ignore[PY-SQLI] noms de tables et colonnes issus de la constante _ADDED_COLUMNS
                 existing = {row[1] for row in conn.execute(f"PRAGMA table_info({table})")}
                 for name, decl in columns:
                     if name not in existing:
+                        # secuscan: ignore[PY-SQLI] migration à partir de la constante _ADDED_COLUMNS
                         conn.execute(f"ALTER TABLE {table} ADD COLUMN {name} {decl}")
             conn.execute("CREATE INDEX IF NOT EXISTS idx_scans_org ON scans(org_id, created_at)")
             # Reprise des alertes ignorées de la première version (sans organisation)
@@ -374,6 +376,7 @@ class Storage:
                 "created_at")
         with self._conn() as conn:
             rows = conn.execute(
+                # secuscan: ignore[PY-SQLI-BUILD] liste de colonnes constante, valeur utilisateur paramétrée (?)
                 f"SELECT {', '.join(keys)} FROM invoices WHERE org_id = ? ORDER BY created_at DESC", (org_id,)
             ).fetchall()
         return [dict(zip(keys, r, strict=True)) for r in rows]

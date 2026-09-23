@@ -1,0 +1,9 @@
+# Configuration SecuScan de ce dépôt : SecuScan s'analyse lui-même en CI (voir docs/integration-ci.md)
+fail_on: high
+exclude:
+  - demo/                                   # projet volontairement vulnérable (démonstration)
+  - benchmark/                              # corpus volontairement vulnérable (benchmark)
+  - apps/api/tests/                         # cas de test contenant du code vulnérable
+  - apps/api/secuscan/analyzers/rules.py    # définitions des règles : motifs et descriptions, pas du code exécuté
+  - apps/web/dist/                          # build généré
+  - docs/

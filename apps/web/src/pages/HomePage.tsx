@@ -3,14 +3,18 @@ import { Link, useNavigate } from "react-router-dom";
 import { ApiError, api, type Health, type Scan } from "../api";
 import { formatDate, grade } from "../labels";
 
-const SNIPPET_EXAMPLE = `from flask import request
-import sqlite3
-
-def find_user():
-    email = request.args.get("email")
-    db = sqlite3.connect("app.db")
-    return db.execute("SELECT * FROM users WHERE email = '" + email + "'").fetchall()
-`;
+// Exemple volontairement vulnérable, prérempli dans « Coller du code »
+const SNIPPET_EXAMPLE = [
+  "from flask import request",
+  "import sqlite3",
+  "",
+  "def find_user():",
+  '    email = request.args.get("email")',
+  '    db = sqlite3.connect("app.db")',
+  // secuscan: ignore[JS-SQLI-BUILD] texte d'exemple affiché à l'utilisateur, jamais exécuté
+  `    return db.execute("SELECT * FROM users WHERE email = '" + email + "'").fetchall()`,
+  "",
+].join("\n");
 
 const EXTENSIONS = [
   { ext: "py", label: "Python" },

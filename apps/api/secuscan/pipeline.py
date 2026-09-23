@@ -31,6 +31,28 @@ _ENTRY_POINT = re.compile(
 
 _KIND_PRIORITY = {"sast": 0, "ai": 0, "secret": 0, "dependency": 1}
 
+# Suppression dans le code : « secuscan: ignore[PY-SQLI] justification » en commentaire, sur la ligne
+# signalée ou celle du dessus. Sans liste de règles, toutes les alertes de la ligne sont concernées.
+_INLINE_IGNORE = re.compile(r"secuscan:\s*ignore(?:\[([A-Za-z0-9_,\s-]+)\])?\s*[:—-]?\s*(.*)", re.I)
+
+
+def _inline_suppression(finding: Finding, source: SourceFile | None) -> str | None:
+    if source is None or finding.kind == "dependency":
+        return None
+    lines = source.content.split("\n")
+    for line_no in (finding.start_line, finding.start_line - 1):
+        if not 1 <= line_no <= len(lines):
+            continue
+        m = _INLINE_IGNORE.search(lines[line_no - 1])
+        if not m:
+            continue
+        rules = {r.strip().upper() for r in (m.group(1) or "").split(",") if r.strip()}
+        if rules and finding.rule_id.upper() not in rules:
+            continue
+        reason = re.sub(r"\s*(\*/\s*\}?|-->|\?>)\s*$", "", m.group(2)).strip()
+        return f"Suppression dans le code : {reason or 'sans justification'}"
+    return None
+
 
 def new_id() -> str:
     return uuid.uuid4().hex[:12]
@@ -85,12 +107,12 @@ class ScanService:
         scan.stage, scan.progress = stage, round(progress, 3)
         self.storage.save_scan(scan)
 
-    def run(self, scan: Scan, root: Path) -> list[Finding]:
+    def run(self, scan: Scan, root: Path, exclude: list[str] | None = None) -> list[Finding]:
         started = time.monotonic()
         scan.status = "running"
         scan.ai_enabled = self.settings.ai_enabled
         self._progress(scan, "Lecture du code et détection des langages", 0.05)
-        codebase = collect_codebase(root, self.settings)
+        codebase = collect_codebase(root, self.settings, exclude)
         scan.summary.files_scanned = len(codebase.files) + len(codebase.manifests)
         scan.summary.lines_scanned = codebase.line_count
         scan.summary.languages = codebase.languages
@@ -107,7 +129,7 @@ class ScanService:
         enricher = Enricher(self.settings, self.storage, AIBudget(*self.settings.ai_budget_for(self._plan(scan))))
         findings += self._logic(scan, findings, redacted, enricher)
 
-        findings = self._apply_dismissals(scan, findings)
+        findings = self._apply_dismissals(scan, findings, redacted)
         self._enrich(scan, findings, redacted, enricher)
         self._record_ai_usage(scan, enricher)
 
@@ -225,12 +247,15 @@ class ScanService:
             )
         return findings
 
-    def _apply_dismissals(self, scan: Scan, findings: list[Finding]) -> list[Finding]:
+    def _apply_dismissals(self, scan: Scan, findings: list[Finding], redacted: dict) -> list[Finding]:
         dismissed = self.storage.dismissals_for(scan.project_name, org_id=scan.org_id or "")
         for f in findings:
             if f.fingerprint in dismissed:
                 f.status = "dismissed"
                 f.dismiss_reason, f.dismiss_justification = dismissed[f.fingerprint]
+            elif justification := _inline_suppression(f, redacted.get(f.file)):
+                f.status = "dismissed"
+                f.dismiss_reason, f.dismiss_justification = "accepted_risk", justification
         return findings
 
     def _logic(self, scan: Scan, findings: list[Finding], redacted: dict, enricher: Enricher) -> list[Finding]:
@@ -247,7 +272,7 @@ class ScanService:
         )
         candidates.sort(key=lambda s: (-len(_ENTRY_POINT.findall(s.content)), s.path))
         sources = candidates[:limit]
-        if skipped := len(candidates) - len(sources):
+        if (skipped := len(candidates) - len(sources)) and self.settings.ai_enabled:
             scan.summary.warnings.append(
                 f"Revue logique IA limitée aux {len(sources)} fichiers les plus exposés ({skipped} non relus)."
             )
@@ -343,8 +368,10 @@ class ScanService:
         s.ai_errors = errors + refused
         s.ai_budget_refused = refused
         if not self.settings.ai_enabled and errors:
+            cause = ("IA désactivée pour cette analyse" if self.settings.secuscan_ai_disabled
+                     else "IA non configurée")
             s.warnings.append(
-                "IA non configurée : ni validation des faux positifs, ni revue logique ; "
+                f"{cause} : ni validation des faux positifs, ni revue logique ; "
                 "les explications et correctifs affichés sont ceux, génériques, des règles."
             )
         elif errors:

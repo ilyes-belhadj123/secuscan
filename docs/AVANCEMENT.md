@@ -8,9 +8,9 @@ Légende : ✅ fait · 🟡 partiel (voir « reste à faire ») · ⬜ à faire 
 
 | | Tickets |
 |---|---|
-| ✅ Fait | 16 |
+| ✅ Fait | 17 |
 | 🟡 Partiel | 3 |
-| ⬜ À faire | 5 |
+| ⬜ À faire | 4 |
 
 ## Qualité de détection (benchmark SS-8)
 
@@ -84,13 +84,13 @@ volontairement vulnérable « Acme Shop » (4 langages).
 |---|---|---|
 | SS-21 | Bêta 10 équipes pilotes | ⬜ |
 | SS-22 | Commentaires automatiques sur pull requests (V2) | ⬜ |
-| SS-23 | Job CI/CD bloquant (V2) | ⬜ |
+| SS-23 | Job CI/CD bloquant (V2) | ✅ commande `secuscan scan` (seuil, codes retour documentés, `.secuscan.yml`, SARIF, suppression justifiée dans le code) ; [doc d'intégration](integration-ci.md) GitHub / GitLab ; SecuScan s'analyse lui-même en CI |
 | SS-24 | Mode formation (V2) | ⬜ |
 
 ## Prochaines étapes
 
-1. SS-23 — commande `secuscan` pour la CI (seuil de sévérité, code retour).
-2. SS-17 — OAuth GitHub / GitLab pour les dépôts privés.
+1. SS-17 — OAuth GitHub / GitLab pour les dépôts privés (application OAuth à créer sur GitHub).
+2. SS-5 — adaptateur SARIF pour brancher un moteur SAST open source (attention aux licences des règles).
 3. SS-5 — brancher un moteur SAST open source en complément des règles maison.
 4. Mise en ligne (hébergement HTTPS) : désormais possible grâce aux comptes.
 
@@ -98,7 +98,8 @@ volontairement vulnérable « Acme Shop » (4 langages).
 
 | Date | Commit | Contenu |
 |---|---|---|
-| 23/09/2026 | (ce commit) | E-mails (SMTP ou boîte d'envoi locale), invitations par e-mail, mot de passe oublié |
+| 23/09/2026 | (ce commit) | SS-23 CLI + SARIF + CI ; SecuScan s'analyse lui-même : correctif SCA (plages de package.json ignorées si lockfile) et react-router 6 → 7 (vulnérabilité GHSA-337j-9hxr-rhxg) |
+| 23/09/2026 | `5be0ed6` | E-mails (SMTP ou boîte d'envoi locale), invitations par e-mail, mot de passe oublié |
 | 23/09/2026 | `a1b2e98` | SS-20 offres, quotas, changement d'offre, factures pro forma, webhook signé |
 | 23/09/2026 | `4132b5d` | SS-2 comptes, organisations, rôles, invitations, isolation multi-tenant ; SS-19 audit réservé aux admins ; interrupteur `SECUSCAN_AI_DISABLED` |
 | 23/09/2026 | `312720e` | SS-10 relecture de 30 explications IA, prompt v2 (environnement d'exécution, rien d'inventé, CWE précis), extraits sans accolade du bloc parent |
