@@ -47,6 +47,27 @@ def test_lockfile_supersedes_ranges():
     assert deps == {("vite", "6.4.3", "web/package-lock.json"), ("lodash", "4.17.15", "legacy/package.json")}
 
 
+POM = """<project xmlns="http://maven.apache.org/POM/4.0.0"><dependencies><dependency>
+<groupId>org.apache.logging.log4j</groupId><artifactId>log4j-core</artifactId><version>2.14.1</version>
+</dependency></dependencies></project>"""
+
+BILLION_LAUGHS = """<?xml version="1.0"?>
+<!DOCTYPE lolz [<!ENTITY lol "lol"><!ENTITY lol2 "&lol;&lol;&lol;&lol;&lol;&lol;&lol;&lol;&lol;&lol;">
+<!ENTITY lol3 "&lol2;&lol2;&lol2;&lol2;&lol2;&lol2;&lol2;&lol2;&lol2;&lol2;">]>
+<project><dependencies><dependency><groupId>&lol3;</groupId><artifactId>a</artifactId>
+<version>1.0</version></dependency></dependencies></project>"""
+
+
+def test_pom_parsed():
+    deps = sca.parse_pom(ManifestFile("pom.xml", "pom.xml", POM))
+    assert [(d.name, d.version) for d in deps] == [("org.apache.logging.log4j:log4j-core", "2.14.1")]
+
+
+def test_malicious_pom_is_rejected():
+    # Un pom.xml piégé (entités imbriquées) est ignoré au lieu d'être développé en mémoire
+    assert sca.parse_pom(ManifestFile("pom.xml", "pom.xml", BILLION_LAUGHS)) == []
+
+
 def test_package_lock_v1_parsed():
     lock = {"lockfileVersion": 1, "dependencies": {
         "express": {"version": "4.13.4", "dependencies": {"qs": {"version": "6.1.0"}}},

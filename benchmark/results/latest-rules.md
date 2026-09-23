@@ -1,6 +1,6 @@
 # Benchmark SecuScan — règles seules
 
-Exécuté le 23/09/2026 15:08 UTC · 86 failles attendues · tolérance ±2 lignes
+Exécuté le 23/09/2026 15:10 UTC · 86 failles attendues · tolérance ±2 lignes
 
 | Langage | Détectées | Manquées | Faux positifs | Taux de détection | Taux de faux positifs |
 |---|---|---|---|---|---|

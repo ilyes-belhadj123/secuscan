@@ -11,6 +11,8 @@ from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass
 
 import httpx
+from defusedxml import DefusedXmlException
+from defusedxml.ElementTree import fromstring as safe_xml_fromstring
 
 from ..ingest import ManifestFile
 from ..models import Advisory, Severity
@@ -129,8 +131,11 @@ def parse_composer_lock(m: ManifestFile) -> list[Dependency]:
 
 def parse_pom(m: ManifestFile) -> list[Dependency]:
     try:
-        root = ET.fromstring(m.content)  # noqa: S314 — pas d'entités externes résolues par ElementTree
-    except ET.ParseError:
+        # Le pom.xml vient du dépôt analysé (donnée non fiable) : defusedxml refuse DTD et entités
+        # (« billion laughs », entités externes) qui pourraient saturer le serveur d'analyse
+        root = safe_xml_fromstring(m.content, forbid_dtd=True)
+    except (ET.ParseError, DefusedXmlException):
+        log.warning("pom.xml ignoré (XML invalide ou constructions dangereuses) : %s", m.path)
         return []
     ns = {"m": root.tag.split("}")[0].strip("{")} if root.tag.startswith("{") else {}
     prefix = "m:" if ns else ""
