@@ -7,7 +7,7 @@ import stat
 import subprocess
 import tempfile
 import zipfile
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path, PurePosixPath
 
 from .config import Settings
@@ -62,6 +62,7 @@ class ManifestFile:
 class CodeBase:
     files: list[SourceFile]
     manifests: list[ManifestFile]
+    vendored: list[str] = field(default_factory=list)  # bibliothèques tierces ignorées
 
     @property
     def languages(self) -> dict[str, int]:
@@ -129,6 +130,27 @@ def _read_text(path: Path) -> str | None:
     return raw.decode("utf-8", errors="replace")
 
 
+# Bibliothèques tierces copiées dans le projet : ce n'est pas le code de l'équipe (bruit massif)
+_MINIFIED_NAME = re.compile(r"[.-]min\.(js|mjs|cjs)$|\.bundle\.js$|\.chunk\.js$", re.I)
+_VERSION = re.compile(r"\bv?\d+\.\d+")
+_LICENSE = re.compile(r"@license|\(c\)|copyright|licensed under|\bMIT\b", re.I)
+
+
+def is_vendored(rel_path: str, content: str) -> bool:
+    """Fichier minifié, ou bibliothèque tierce reconnaissable à son bandeau (version + licence)."""
+    if _MINIFIED_NAME.search(rel_path):
+        return True
+    if not rel_path.endswith((".js", ".mjs", ".cjs")):
+        return False
+    head = content.lstrip()[:800]
+    if head.startswith("/*"):
+        banner = head.split("*/", 1)[0]
+        if _VERSION.search(banner) and _LICENSE.search(banner):
+            return True
+    lines = content.split("\n", 200)[:200]
+    return sum(1 for line in lines if len(line) > 500) >= 3  # code minifié sans nom explicite
+
+
 def is_excluded(rel_path: str, patterns: list[str]) -> bool:
     """Motifs de type glob sur le chemin relatif (« tests/* », « *.min.js », « docs/ »)."""
     for pattern in patterns:
@@ -145,6 +167,7 @@ def is_excluded(rel_path: str, patterns: list[str]) -> bool:
 def collect_codebase(root: Path, settings: Settings, exclude: list[str] | None = None) -> CodeBase:
     files: list[SourceFile] = []
     manifests: list[ManifestFile] = []
+    vendored: list[str] = []
     root = root.resolve()
     for path in sorted(root.rglob("*")):
         rel_parts = path.relative_to(root).parts
@@ -163,8 +186,11 @@ def collect_codebase(root: Path, settings: Settings, exclude: list[str] | None =
             continue
         language = LANGUAGE_BY_EXTENSION.get(path.suffix.lower())
         if language and (content := _read_text(path)) is not None:
+            if is_vendored(rel, content):
+                vendored.append(rel)
+                continue
             files.append(SourceFile(path=rel, language=language, content=content))
-    return CodeBase(files=files, manifests=manifests)
+    return CodeBase(files=files, manifests=manifests, vendored=vendored)
 
 
 def language_for_filename(filename: str) -> str | None:

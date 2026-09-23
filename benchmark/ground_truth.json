@@ -20,6 +20,11 @@
           {"contains": "hashlib.md5(password.encode())", "cwe": "CWE-916"},
           {"contains": "verify=False", "cwe": "CWE-295"}
         ],
+        "python/students_dao.py": [
+          {"contains": "\"VALUES ('%(name)s')\" % {\"name\": name}", "cwe": "CWE-89"},
+          {"contains": "\"WHERE city = '{}'\".format(city)", "cwe": "CWE-89"},
+          {"contains": "return md5(password.encode())", "cwe": "CWE-916"}
+        ],
         "javascript/shop_server.js": [
           {"contains": "cors({ origin: \"*\" })", "cwe": "CWE-942"},
           {"contains": "WHERE id = \" + req.params.id", "cwe": "CWE-89"},

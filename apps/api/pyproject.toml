@@ -19,6 +19,7 @@ dependencies = [
     "email-validator>=2.3.0",
     "pyyaml>=6.0.3",
     "cryptography>=50.0.1",
+    "bandit>=1.9.4",
 ]
 
 [dependency-groups]

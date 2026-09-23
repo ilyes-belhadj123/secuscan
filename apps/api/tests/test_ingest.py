@@ -70,6 +70,18 @@ def test_not_a_zip(tmp_path, settings):
         safe_extract_zip(fake, tmp_path, settings)
 
 
+@pytest.mark.parametrize("name,content,vendored", [
+    ("static/jquery-3.2.1.min.js", "!function(){eval(x)}()", True),
+    ("static/lib.js", "/*! Lib v1.2.3 | (c) Exemple | MIT License */\nvar a = eval(b);", True),
+    ("src/app.js", "// Application Acme\nconst total = eval(expr);\n", False),
+    ("src/big.js", "\n".join("x" * 600 for _ in range(3)), True),
+])
+def test_vendored_files(name, content, vendored):
+    from secuscan.ingest import is_vendored
+
+    assert is_vendored(name, content) is vendored
+
+
 def test_ignored_dirs(tmp_path, settings):
     (tmp_path / "node_modules" / "lib").mkdir(parents=True)
     (tmp_path / "node_modules" / "lib" / "index.js").write_text("eval(x)")

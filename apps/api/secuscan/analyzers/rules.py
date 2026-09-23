@@ -36,6 +36,8 @@ def _r(pattern: str, flags: int = 0) -> re.Pattern:
 
 _SENSITIVE_CONTEXT = _r(r"token|secret|password|passwd|reset|otp|session|key|nonce|reference", re.I)
 _SQL = r"(?i:SELECT|INSERT|UPDATE|DELETE)\b"
+# Clause SQL en milieu de chaîne (requête écrite sur plusieurs lignes par concaténation implicite)
+_SQL_CLAUSE = r"(?i:\bVALUES\b|\bWHERE\b|\bSET\b|\bFROM\b)"
 
 C, H, M, L = Severity.critical, Severity.high, Severity.medium, Severity.low
 
@@ -85,7 +87,8 @@ RULES: list[Rule] = [
     ),
     Rule(
         "PY-SQLI-BUILD", ("python",),
-        _r(rf"\"{_SQL}[^\"]*\"\s*(%|\+|\.format)|'{_SQL}[^']*'\s*(%|\+|\.format)|\bf[\"']{_SQL}[^\"']*\{{"),
+        _r(rf"\"{_SQL}[^\"]*\"\s*(%|\+|\.format)|'{_SQL}[^']*'\s*(%|\+|\.format)|\bf[\"']{_SQL}[^\"']*\{{"
+           rf"|\"[^\"]*{_SQL_CLAUSE}[^\"]*\"\s*(%\s*[({{\w]|\.format\()|'[^']*{_SQL_CLAUSE}[^']*'\s*(%\s*[({{\w]|\.format\()"),
         "Injection SQL", "CWE-89", C,
         "Une requête SQL est construite par concaténation ou interpolation avant d'être exécutée.",
         "Utiliser des requêtes paramétrées : cursor.execute(\"... WHERE x = ?\", (valeur,)).",
@@ -106,7 +109,7 @@ RULES: list[Rule] = [
     ),
     Rule(
         "PY-WEAKHASH", ("python",),
-        _r(r"\bhashlib\.(md5|sha1)\("),
+        _r(r"\bhashlib\.(md5|sha1)\(|(?<![\w.])(md5|sha1)\(\s*[\w\"']"),
         "Algorithme de hachage faible", "CWE-328", M,
         "MD5 et SHA-1 sont cassés pour les usages de sécurité (mots de passe, signatures).",
         "Pour des mots de passe : argon2 ou bcrypt. Pour l'intégrité : SHA-256 minimum.",

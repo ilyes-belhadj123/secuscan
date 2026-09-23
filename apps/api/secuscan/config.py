@@ -32,6 +32,11 @@ class Settings(BaseSettings):
     # Coupe l'IA même si une clé est configurée (tests, démonstrations sans coût)
     secuscan_ai_disabled: bool = False
     secuscan_offline: bool = False
+    # Moteurs SAST externes (SS-5), en complément des règles maison : bandit, opengrep
+    secuscan_external_engines: list[str] = ["bandit"]
+    # Dossier de règles Opengrep propres à l'éditeur (jamais les règles Semgrep : licence)
+    secuscan_opengrep_rules: str = ""
+
     # Revue logique IA : fichiers de code analysés en entier (coût maîtrisé)
     secuscan_logic_max_files: int = 40
     secuscan_logic_max_lines: int = 400

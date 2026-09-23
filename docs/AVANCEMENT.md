@@ -8,8 +8,8 @@ Légende : ✅ fait · 🟡 partiel (voir « reste à faire ») · ⬜ à faire 
 
 | | Tickets |
 |---|---|
-| ✅ Fait | 17 |
-| 🟡 Partiel | 3 |
+| ✅ Fait | 18 |
+| 🟡 Partiel | 2 |
 | ⬜ À faire | 4 |
 
 ## Qualité de détection (benchmark SS-8)
@@ -51,7 +51,7 @@ volontairement vulnérable « Acme Shop » (4 langages).
 
 | Ticket | Titre | Statut | Réalisé | Reste à faire |
 |---|---|---|---|---|
-| SS-5 | Moteur de règles statiques | 🟡 | 41 règles maison (Python, JS/TS, PHP, Java) avec exclusions par ligne, findings normalisés (fichier, lignes, CWE, OWASP), interface d'adaptateur | Brancher un moteur SAST open source (SARIF) |
+| SS-5 | Moteur de règles statiques | ✅ | 41 règles maison (Python, JS/TS, PHP, Java) ; **Bandit** intégré (Apache 2.0) ; adaptateur **SARIF** générique ; Opengrep branchable avec des règles propres ; bibliothèques tierces minifiées ignorées ; [choix et licences](moteurs-sast.md) | Écrire des règles maison au format Opengrep ; faire valider l'analyse de licences |
 | SS-6 | Détection de secrets | ✅ | Motifs + entropie, valeur jamais stockée ni envoyée à l'IA (masque + empreinte), testé | — |
 | SS-7 | Analyse des dépendances (SCA) | ✅ | requirements / pyproject, package.json / lock, composer, pom.xml ; base OSV.dev + cache ; version corrigée | — |
 | SS-8 | Jeu de référence (benchmark) | ✅ | Corpus annoté 4 langages (cas vulnérables + cas sûrs), `python -m secuscan.benchmark` (détection, faux positifs, mode `--ai`), job CI nocturne + garde-fou de non-régression | Corpus externes (NodeGoat, DVWA, WebGoat) |
@@ -98,7 +98,8 @@ volontairement vulnérable « Acme Shop » (4 langages).
 
 | Date | Commit | Contenu |
 |---|---|---|
-| 23/09/2026 | (ce commit) | SS-17 OAuth GitHub / GitLab, dépôts privés, jetons chiffrés ; script `configure-secrets.ps1` |
+| 23/09/2026 | (ce commit) | SS-5 Bandit + adaptateur SARIF ; testé sur le projet réel DVPWA : SQL sur plusieurs lignes détecté, bibliothèques minifiées ignorées |
+| 23/09/2026 | `f559e5e` | SS-17 OAuth GitHub / GitLab, dépôts privés, jetons chiffrés ; script `configure-secrets.ps1` |
 | 23/09/2026 | `21aacd3` | SS-23 CLI + SARIF + CI ; SecuScan s'analyse lui-même : correctif SCA (plages de package.json ignorées si lockfile) et react-router 6 → 7 (vulnérabilité GHSA-337j-9hxr-rhxg) |
 | 23/09/2026 | `5be0ed6` | E-mails (SMTP ou boîte d'envoi locale), invitations par e-mail, mot de passe oublié |
 | 23/09/2026 | `a1b2e98` | SS-20 offres, quotas, changement d'offre, factures pro forma, webhook signé |

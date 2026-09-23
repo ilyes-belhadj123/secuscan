@@ -9,7 +9,7 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 from pathlib import Path
 
 from .ai.enricher import AIBudget, AIUnavailable, BudgetExceeded, Enricher
-from .analyzers import sast, sca, secrets
+from .analyzers import external, sast, sca, secrets
 from .analyzers.context import enclosing_excerpt, file_header
 from .analyzers.rules import RULES_BY_ID
 from .config import Settings
@@ -116,12 +116,18 @@ class ScanService:
         scan.summary.files_scanned = len(codebase.files) + len(codebase.manifests)
         scan.summary.lines_scanned = codebase.line_count
         scan.summary.languages = codebase.languages
+        if codebase.vendored:
+            examples = ", ".join(codebase.vendored[:3]) + ("…" if len(codebase.vendored) > 3 else "")
+            scan.summary.warnings.append(
+                f"{len(codebase.vendored)} fichier(s) de bibliothèques tierces ou minifiés non analysés ({examples}) : "
+                "préférez les déclarer comme dépendances (package.json) pour qu'elles soient vérifiées."
+            )
 
         self._progress(scan, "Détection des secrets", 0.15)
         findings, redacted = self._secrets(scan, codebase)
 
         self._progress(scan, "Analyse statique (règles)", 0.3)
-        findings += self._sast(scan, redacted)
+        findings += self._sast(scan, redacted, root, findings)
 
         self._progress(scan, "Analyse des dépendances", 0.35)
         findings += self._dependencies(scan, codebase, redacted)
@@ -179,33 +185,50 @@ class ScanService:
                 )
         return findings, redacted_files
 
-    def _sast(self, scan: Scan, redacted: dict) -> list[Finding]:
+    def _sast(self, scan: Scan, redacted: dict, root: Path, existing: list[Finding]) -> list[Finding]:
+        code_files = {p: s for p, s in redacted.items() if p.split("/")[-1] not in MANIFEST_FILES}
+        raws = [raw for source in code_files.values() for raw in sast.analyze_file(source)]
+        # Moteurs externes (SS-5) : une ligne déjà signalée (règle maison ou secret) n'est pas dupliquée
+        flagged = {(f.file, f.start_line) for f in existing} | {(r.file, r.start_line) for r in raws}
+        external = self._external_engines(root, code_files)
+        raws += [r for r in external if (r.file, r.start_line) not in flagged]
+
         findings = []
         seen = set()
-        for source in redacted.values():
-            if source.path.split("/")[-1] in MANIFEST_FILES:
+        for raw in raws:
+            # Deux règles qui signalent la même faille (même CWE) sur la même ligne : une seule alerte
+            key = (raw.cwe, raw.file, raw.start_line)
+            if key in seen:
                 continue
+            seen.add(key)
+            source = code_files[raw.file]
             lines = source.content.split("\n")
-            for raw in sast.analyze_file(source):
-                # Deux règles qui signalent la même faille (même CWE) sur la même ligne : une seule alerte
-                key = (raw.cwe, raw.file, raw.start_line)
-                if key in seen:
-                    continue
-                seen.add(key)
-                excerpt = enclosing_excerpt(lines, source.language, raw.start_line, raw.end_line)
-                rule = RULES_BY_ID[raw.rule_id]
-                findings.append(
-                    Finding(
-                        id=new_id(), scan_id=scan.id, kind="sast", rule_id=raw.rule_id, title=raw.title,
-                        message=raw.message, fix_hint=rule.fix_hint, language=raw.language, file=raw.file,
-                        start_line=raw.start_line, end_line=raw.end_line,
-                        snippet=excerpt.code, snippet_start_line=excerpt.start_line,
-                        cwe=raw.cwe, owasp=owasp_for(raw.cwe),
-                        raw_severity=raw.severity, severity=raw.severity,
-                        fingerprint=_fingerprint(raw.rule_id, raw.file, _normalize(lines[raw.start_line - 1])),
-                    )
+            if not 1 <= raw.start_line <= len(lines):
+                continue
+            excerpt = enclosing_excerpt(lines, source.language, raw.start_line, min(raw.end_line, len(lines)))
+            rule = RULES_BY_ID.get(raw.rule_id)
+            findings.append(
+                Finding(
+                    id=new_id(), scan_id=scan.id, kind="sast", rule_id=raw.rule_id, title=raw.title,
+                    message=raw.message, fix_hint=rule.fix_hint if rule else None, language=raw.language,
+                    file=raw.file, start_line=raw.start_line, end_line=min(raw.end_line, len(lines)),
+                    snippet=excerpt.code, snippet_start_line=excerpt.start_line,
+                    cwe=raw.cwe, owasp=owasp_for(raw.cwe),
+                    raw_severity=raw.severity, severity=raw.severity,
+                    fingerprint=_fingerprint(raw.rule_id, raw.file, _normalize(lines[raw.start_line - 1])),
                 )
+            )
         return findings
+
+    def _external_engines(self, root: Path, code_files: dict) -> list:
+        engines = self.settings.secuscan_external_engines
+        results = []
+        if "bandit" in engines:
+            results += external.run_bandit(root, [p for p, s in code_files.items() if s.language == "python"])
+        if "opengrep" in engines:
+            results += external.run_opengrep(root, self.settings.secuscan_opengrep_rules,
+                                             {p: s.language for p, s in code_files.items()})
+        return results
 
     def _dependencies(self, scan: Scan, codebase: CodeBase, redacted: dict) -> list[Finding]:
         deps = sca.parse_manifests(codebase.manifests)

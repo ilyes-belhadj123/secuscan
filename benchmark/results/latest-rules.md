@@ -1,15 +1,15 @@
 # Benchmark SecuScan — règles seules
 
-Exécuté le 23/09/2026 14:52 UTC · 83 failles attendues · tolérance ±2 lignes
+Exécuté le 23/09/2026 15:08 UTC · 86 failles attendues · tolérance ±2 lignes
 
 | Langage | Détectées | Manquées | Faux positifs | Taux de détection | Taux de faux positifs |
 |---|---|---|---|---|---|
 | java | 16 | 0 | 1 | 100 % | 6 % |
 | javascript | 16 | 1 | 0 | 94 % | 0 % |
 | php | 18 | 0 | 1 | 100 % | 5 % |
-| python | 24 | 1 | 2 | 96 % | 8 % |
+| python | 27 | 1 | 2 | 96 % | 7 % |
 | typescript | 7 | 0 | 0 | 100 % | 0 % |
-| **Total** | **81** | **2** | **4** | **98 %** | **5 %** |
+| **Total** | **84** | **2** | **4** | **98 %** | **5 %** |
 
 Alertes écartées par la validation IA : 0 · doublons : 0
 
