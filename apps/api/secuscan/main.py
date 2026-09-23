@@ -196,6 +196,29 @@ def dismiss_finding(finding_id: str, body: DismissRequest, service: ScanService 
     return finding
 
 
+@app.get("/api/costs")
+def ai_costs(service: ScanService = Depends(get_service)):
+    """Coût IA par analyse (SS-12) : appels, cache, jetons et estimation en dollars."""
+    settings = service.settings
+    max_calls, max_tokens = settings.ai_budget
+    scans = [s for s in service.storage.list_scans() if s.status == "completed"]
+    rows = [
+        {"id": s.id, "project_name": s.project_name, "created_at": s.created_at, "plan": s.summary.plan,
+         "calls": s.summary.ai_calls, "cache_hits": s.summary.ai_cache_hits, "tokens": s.summary.ai_tokens,
+         "cost_usd": s.summary.ai_cost_usd, "budget_refused": s.summary.ai_budget_refused,
+         "lines": s.summary.lines_scanned}
+        for s in scans
+    ]
+    return {
+        "plan": settings.secuscan_plan, "budget_calls": max_calls, "budget_tokens": max_tokens,
+        "price_input_per_mtok": settings.secuscan_ai_price_input_per_mtok,
+        "price_output_per_mtok": settings.secuscan_ai_price_output_per_mtok,
+        "total_cost_usd": round(sum(r["cost_usd"] for r in rows), 4),
+        "total_tokens": sum(r["tokens"] for r in rows),
+        "scans": rows,
+    }
+
+
 @app.get("/api/audit")
 def audit_log(service: ScanService = Depends(get_service)):
     return service.storage.list_audit()

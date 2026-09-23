@@ -46,6 +46,15 @@ export function grade(score: number): string {
   return "E";
 }
 
+export function formatUsd(value: number): string {
+  if (value > 0 && value < 0.01) return "< 0,01 $";
+  return `${value.toLocaleString("fr-FR", { minimumFractionDigits: 2, maximumFractionDigits: 2 })} $`;
+}
+
+export function formatTokens(value: number): string {
+  return value >= 1000 ? `${Math.round(value / 1000).toLocaleString("fr-FR")} k` : String(value);
+}
+
 export function formatDate(iso: string): string {
   return new Date(iso).toLocaleString("fr-FR", { dateStyle: "medium", timeStyle: "short" });
 }

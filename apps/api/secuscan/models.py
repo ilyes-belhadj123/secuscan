@@ -50,6 +50,8 @@ class AIReview(BaseModel):
     model: str
     cached: bool = False
     filtered: bool = False
+    # "ai" : produit par le modèle ; "osv" : généré localement depuis la base de vulnérabilités
+    generated_by: Literal["ai", "osv"] = "ai"
 
 
 class Advisory(BaseModel):
@@ -119,6 +121,10 @@ class ScanSummary(BaseModel):
     ai_cache_hits: int = 0
     ai_tokens: int = 0
     ai_errors: int = 0
+    ai_cost_usd: float = 0.0
+    ai_budget_calls: int = 0
+    ai_budget_refused: int = 0
+    plan: str = ""
     # Limites de l'analyse à signaler à l'utilisateur (ex. base de vulnérabilités injoignable)
     warnings: list[str] = Field(default_factory=list)
     duration_seconds: float = 0.0

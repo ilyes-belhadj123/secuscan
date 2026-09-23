@@ -8,8 +8,8 @@ Légende : ✅ fait · 🟡 partiel (voir « reste à faire ») · ⬜ à faire 
 
 | | Tickets |
 |---|---|
-| ✅ Fait | 12 |
-| 🟡 Partiel | 5 |
+| ✅ Fait | 13 |
+| 🟡 Partiel | 4 |
 | ⬜ À faire | 7 |
 
 ## Qualité de détection (benchmark SS-8)
@@ -62,7 +62,7 @@ volontairement vulnérable « Acme Shop » (4 langages).
 | SS-9 | Validation contextuelle des alertes | ✅ | Fonction englobante + imports + constantes du module, verdict JSON, faux positifs masqués ; **7 % de faux positifs mesurés avec le vrai modèle** | — |
 | SS-10 | Explication pédagogique | 🟡 | Prompt français, scénario conceptuel, filtre de sortie anti-charge offensive | Relecture de 30 explications générées par le vrai modèle |
 | SS-11 | Proposition de correctif | 🟡 | Diff avant/après, bouton copier, vérification syntaxique (Python) | Vérification JS/PHP/Java, mesure 80 % de correctifs valides |
-| SS-12 | Maîtrise des coûts IA | 🟡 | Cache par empreinte, extraits ciblés, compteur d'appels / jetons par scan | Budget et plafonds par offre |
+| SS-12 | Maîtrise des coûts IA | ✅ | Budget par analyse et par offre (Free 40 / Pro 150 / Business 500 appels), priorisation par gravité, revue logique limitée aux fichiers exposés, dépendances peu graves expliquées sans IA (base OSV), cache par empreinte, coût estimé par analyse + page « Coûts IA ». Mesuré : NodeGoat (3 087 lignes) **0,97 $** | Regrouper plusieurs alertes d'un même fichier par appel |
 | SS-13 | Classification et sévérité | ✅ | Mapping CWE → OWASP Top 10 2025, 4 niveaux, règles de scoring documentées | — |
 
 ## Sprint 4 — Produit
@@ -88,16 +88,16 @@ volontairement vulnérable « Acme Shop » (4 langages).
 
 ## Prochaines étapes
 
-1. SS-12 — plafonds de coût IA par analyse (priorité : un gros projet comme NodeGoat, avec
-   133 dépendances vulnérables, déclencherait plus de 150 appels IA).
-2. SS-11 — vérification syntaxique des correctifs JS / PHP / Java.
-3. SS-10 — relecture de 30 explications générées par le vrai modèle.
+1. SS-11 — vérification syntaxique des correctifs JS / PHP / Java.
+2. SS-10 — relecture de 30 explications générées par le vrai modèle.
+3. SS-2 — comptes et organisations (prérequis de l'hébergement en ligne et des offres SS-20).
 
 ## Historique
 
 | Date | Commit | Contenu |
 |---|---|---|
-| 23/09/2026 | (ce commit) | IA réelle validée : benchmark règles + IA (100 % / 7 %), contexte IA enrichi des constantes du module, script `configure-ia.ps1` |
+| 23/09/2026 | (ce commit) | SS-12 coûts IA : budget par offre, priorisation, dépendances sans IA, page « Coûts IA » ; robustesse aux réponses vides / tronquées. Vrai projet NodeGoat avec IA : 25 failles logiques trouvées pour 0,97 $ |
+| 23/09/2026 | `5842133` | IA réelle validée : benchmark règles + IA (100 % / 7 %), contexte IA enrichi des constantes du module, script `configure-ia.ps1` |
 | 23/09/2026 | `26622da` | Correctif SCA trouvé sur un vrai projet (OWASP NodeGoat, 1 108 dépendances) : envoi par lots à OSV, lockfile v1, limites de l'analyse affichées (écran + PDF) au lieu d'échecs silencieux |
 | 23/09/2026 | `0e3a279` | SS-8 benchmark + règles améliorées (détection 82 % → 98 %, faux positifs 9 % → 5 %) |
 | 23/09/2026 | `f4aeb82` | Tableau de suivi des tickets |

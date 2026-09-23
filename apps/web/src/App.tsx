@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 import { Link, Route, Routes } from "react-router-dom";
 import { api, type Health } from "./api";
 import AuditPage from "./pages/AuditPage";
+import CostsPage from "./pages/CostsPage";
 import FindingPage from "./pages/FindingPage";
 import HomePage from "./pages/HomePage";
 import ScanPage from "./pages/ScanPage";
@@ -30,6 +31,7 @@ export default function App() {
         <Logo />
         <span className="muted small">Analyse de sécurité du code assistée par IA</span>
         <span className="spacer" />
+        <Link to="/couts" className="small" style={{ fontWeight: 600 }}>Coûts IA</Link>
         <Link to="/audit" className="small" style={{ fontWeight: 600 }}>Journal d'audit</Link>
         {health && (
           <span className="badge" title={health.ai_enabled ? `Modèle : ${health.model}` : "Réponses IA servies depuis le cache"}>
@@ -41,6 +43,7 @@ export default function App() {
       <Routes>
         <Route path="/" element={<HomePage health={health} />} />
         <Route path="/audit" element={<AuditPage />} />
+        <Route path="/couts" element={<CostsPage />} />
         <Route path="/scans/:scanId" element={<ScanPage />} />
         <Route path="/scans/:scanId/findings/:findingId" element={<FindingPage />} />
       </Routes>

@@ -3,7 +3,9 @@ import { Link, useNavigate, useParams } from "react-router-dom";
 import { api, type Finding, type FindingKind, type FindingStatus, type HistoryPoint, type Scan, type Severity } from "../api";
 import { SeverityBadge, VerdictBadge } from "../components/Badges";
 import { OwaspChart, ScoreHistoryChart, SeverityChart } from "../components/Charts";
-import { KIND_LABEL, LANGUAGE_LABEL, SEVERITIES, SEVERITY_LABEL, formatDate, grade } from "../labels";
+import {
+  KIND_LABEL, LANGUAGE_LABEL, SEVERITIES, SEVERITY_LABEL, formatDate, formatTokens, formatUsd, grade,
+} from "../labels";
 
 const BASE_STEPS = [
   "Lecture du code et détection des langages",
@@ -148,6 +150,13 @@ export default function ScanPage() {
             {s.lines_scanned.toLocaleString("fr-FR")} lignes · {s.duration_seconds} s ·{" "}
             {Object.entries(s.languages).map(([k, v]) => `${LANGUAGE_LABEL[k] ?? k} (${v})`).join(", ")}
           </div>
+          {(s.ai_calls > 0 || s.ai_cache_hits > 0) && (
+            <div className="secondary small">
+              IA : {s.ai_calls} appel(s){s.ai_budget_calls ? ` sur ${s.ai_budget_calls} autorisés` : ""} ·{" "}
+              {s.ai_cache_hits} réponse(s) en cache · {formatTokens(s.ai_tokens)} jetons · coût estimé{" "}
+              <strong>{formatUsd(s.ai_cost_usd ?? 0)}</strong> · <Link to="/couts">détail des coûts</Link>
+            </div>
+          )}
         </div>
         <div className="row">
           <a className="btn" href={api.reportUrl(scan.id, "json")} download>

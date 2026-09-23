@@ -8,6 +8,14 @@ REPO_ROOT = API_ROOT.parent.parent
 DEMO_PROJECT_DIR = REPO_ROOT / "demo" / "acme-shop"
 
 
+# Budget IA par analyse et par offre : (appels max, jetons max)
+PLAN_AI_BUDGETS = {
+    "free": (40, 120_000),
+    "pro": (150, 500_000),
+    "business": (500, 2_000_000),
+}
+
+
 class Settings(BaseSettings):
     model_config = SettingsConfigDict(
         env_file=(REPO_ROOT / ".env", API_ROOT / ".env"),
@@ -25,6 +33,21 @@ class Settings(BaseSettings):
     # Revue logique IA : fichiers de code analysés en entier (coût maîtrisé)
     secuscan_logic_max_files: int = 40
     secuscan_logic_max_lines: int = 400
+
+    # Maîtrise des coûts IA (SS-12)
+    secuscan_plan: str = "pro"
+    # Part maximale du budget d'appels consacrée à la revue logique des fichiers
+    secuscan_logic_budget_share: float = 0.25
+    # Dépendances expliquées par l'IA (les plus graves) ; les autres : explication locale depuis OSV
+    secuscan_ai_max_dependency_reviews: int = 10
+    # Tarifs en $ par million de jetons (Claude Sonnet 5 : 2 $ en entrée, 10 $ en sortie)
+    secuscan_ai_price_input_per_mtok: float = 2.0
+    secuscan_ai_price_output_per_mtok: float = 10.0
+
+    @property
+    def ai_budget(self) -> tuple[int, int]:
+        """(appels max, jetons max) par analyse selon l'offre."""
+        return PLAN_AI_BUDGETS.get(self.secuscan_plan, PLAN_AI_BUDGETS["pro"])
 
     # Limites d'import
     max_upload_bytes: int = 100 * 1024 * 1024

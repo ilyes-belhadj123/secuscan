@@ -28,6 +28,7 @@ export interface AIReview {
   model: string;
   cached: boolean;
   filtered: boolean;
+  generated_by: "ai" | "osv";
 }
 
 export interface Advisory {
@@ -88,6 +89,10 @@ export interface ScanSummary {
   ai_cache_hits: number;
   ai_tokens: number;
   ai_errors: number;
+  ai_cost_usd: number;
+  ai_budget_calls: number;
+  ai_budget_refused: number;
+  plan: string;
   warnings: string[];
   duration_seconds: number;
 }
@@ -123,6 +128,30 @@ export interface AuditEntry {
   action: string;
   target: string;
   details: Record<string, string | number | null>;
+}
+
+export interface CostRow {
+  id: string;
+  project_name: string;
+  created_at: string;
+  plan: string;
+  calls: number;
+  cache_hits: number;
+  tokens: number;
+  cost_usd: number;
+  budget_refused: number;
+  lines: number;
+}
+
+export interface Costs {
+  plan: string;
+  budget_calls: number;
+  budget_tokens: number;
+  price_input_per_mtok: number;
+  price_output_per_mtok: number;
+  total_cost_usd: number;
+  total_tokens: number;
+  scans: CostRow[];
 }
 
 export interface Health {
@@ -175,6 +204,7 @@ export const api = {
   dismiss: (id: string, reason: string, justification: string) =>
     request<Finding>(`/api/findings/${id}/dismiss`, json({ reason, justification })),
   audit: () => request<AuditEntry[]>("/api/audit"),
+  costs: () => request<Costs>("/api/costs"),
   reportUrl: (id: string, format: "pdf" | "json", options?: { preparedFor?: string; preparedBy?: string }) => {
     const params = new URLSearchParams();
     if (options?.preparedFor?.trim()) params.set("prepared_for", options.preparedFor.trim());

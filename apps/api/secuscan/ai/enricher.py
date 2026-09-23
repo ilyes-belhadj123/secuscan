@@ -32,7 +32,41 @@ class AIUnavailable(RuntimeError):
     pass
 
 
+class BudgetExceeded(AIUnavailable):
+    """Budget IA de l'analyse épuisé : l'alerte garde l'explication générique de sa règle."""
+
+
+class AIBudget:
+    """Plafond d'appels et de jetons pour une analyse (SS-12). Les réponses en cache sont gratuites."""
+
+    def __init__(self, max_calls: int, max_tokens: int):
+        self.max_calls = max_calls
+        self.max_tokens = max_tokens
+        self.calls = 0
+        self.tokens = 0
+        self.refused = 0
+        self._lock = threading.Lock()
+
+    def reserve(self) -> None:
+        with self._lock:
+            if self.calls >= self.max_calls or self.tokens >= self.max_tokens:
+                self.refused += 1
+                raise BudgetExceeded("Budget IA de l'analyse atteint : explication générique de la règle.")
+            self.calls += 1
+
+    def consume(self, tokens: int) -> None:
+        with self._lock:
+            self.tokens += tokens
+
+    @property
+    def remaining_calls(self) -> int:
+        with self._lock:
+            return max(0, self.max_calls - self.calls)
+
+
 LOGIC_MIN_CONFIDENCE = 0.7
+MAX_OUTPUT_TOKENS = 4096
+MAX_OUTPUT_TOKENS_RETRY = 8192
 
 
 @dataclass
@@ -50,16 +84,26 @@ class LogicFlaw:
 class AIStats:
     calls: int = 0
     cache_hits: int = 0
-    tokens: int = 0
+    prompt_tokens: int = 0
+    completion_tokens: int = 0
 
     def __post_init__(self):
         self._lock = threading.Lock()
 
-    def add(self, *, call: bool = False, hit: bool = False, tokens: int = 0) -> None:
+    @property
+    def tokens(self) -> int:
+        return self.prompt_tokens + self.completion_tokens
+
+    def add(self, *, call: bool = False, hit: bool = False, prompt_tokens: int = 0, completion_tokens: int = 0) -> None:
         with self._lock:
             self.calls += int(call)
             self.cache_hits += int(hit)
-            self.tokens += tokens
+            self.prompt_tokens += prompt_tokens
+            self.completion_tokens += completion_tokens
+
+    def cost_usd(self, settings: Settings) -> float:
+        return (self.prompt_tokens * settings.secuscan_ai_price_input_per_mtok
+                + self.completion_tokens * settings.secuscan_ai_price_output_per_mtok) / 1_000_000
 
 
 def _extract_json(text: str) -> dict:
@@ -98,10 +142,11 @@ def unified_diff(original: str, patched: str, file: str, start_line: int) -> str
 
 
 class Enricher:
-    def __init__(self, settings: Settings, storage: Storage):
+    def __init__(self, settings: Settings, storage: Storage, budget: AIBudget | None = None):
         self.settings = settings
         self.storage = storage
         self.stats = AIStats()
+        self.budget = budget or AIBudget(*settings.ai_budget)
 
     # ------------------------------------------------------------------ transport
     def _complete(self, prompt: str) -> dict:
@@ -115,6 +160,7 @@ class Enricher:
             return cached
         if not self.settings.ai_enabled:
             raise AIUnavailable("Clé OpenRouter absente et aucune réponse en cache.")
+        self.budget.reserve()
 
         payload = {
             "model": self.settings.openrouter_model,
@@ -123,7 +169,7 @@ class Enricher:
                 {"role": "user", "content": prompt},
             ],
             "temperature": 0.1,
-            "max_tokens": 2500,
+            "max_tokens": MAX_OUTPUT_TOKENS,
             "response_format": {"type": "json_object"},
         }
         headers = {
@@ -139,12 +185,24 @@ class Enricher:
                     raise httpx.HTTPStatusError("temporaire", request=resp.request, response=resp)
                 resp.raise_for_status()
                 body = resp.json()
-                content = body["choices"][0]["message"]["content"]
+                usage = body.get("usage") or {}
+                prompt_tokens = int(usage.get("prompt_tokens", 0))
+                completion_tokens = int(usage.get("completion_tokens", 0))
+                # Les jetons d'une réponse inexploitable sont quand même facturés : on les compte
+                self.stats.add(call=True, prompt_tokens=prompt_tokens, completion_tokens=completion_tokens)
+                self.budget.consume(prompt_tokens + completion_tokens)
+                choice = body["choices"][0]
+                if choice.get("finish_reason") == "length":
+                    # Réponse tronquée : on retente une fois avec une limite de sortie plus large
+                    payload["max_tokens"] = MAX_OUTPUT_TOKENS_RETRY
+                    raise ValueError("réponse tronquée (limite de jetons de sortie atteinte)")
+                content = (choice.get("message") or {}).get("content")
+                if not content:
+                    raise ValueError(f"réponse vide (finish_reason={choice.get('finish_reason')})")
                 data = _extract_json(content)
-                self.stats.add(call=True, tokens=int((body.get("usage") or {}).get("total_tokens", 0)))
                 self.storage.cache_set("ai", key, data)
                 return data
-            except (httpx.HTTPError, KeyError, ValueError) as exc:
+            except (httpx.HTTPError, KeyError, IndexError, TypeError, ValueError) as exc:
                 last_error = exc
                 log.warning("Appel IA échoué (tentative %d) : %s", attempt + 1, exc)
                 time.sleep(1.5 * (attempt + 1))
@@ -235,6 +293,45 @@ class Enricher:
         return flaws
 
     # ------------------------------------------------------------------ dépendances
+    @staticmethod
+    def local_dependency_review(finding: Finding) -> AIReview:
+        """Explication et correctif générés sans IA, à partir des advisories OSV (coût nul)."""
+        dep = finding.dependency
+        assert dep is not None
+        top = dep.advisories[:3]
+        summaries = " ; ".join(a.summary.rstrip(".") for a in top if a.summary) or "vulnérabilités publiées"
+        count = len(dep.advisories)
+        fix = None
+        if dep.fixed_version:
+            patched = finding.snippet.replace(dep.version, dep.fixed_version)
+            fix = FixSuggestion(
+                original_code=finding.snippet, patched_code=patched,
+                diff=unified_diff(finding.snippet, patched, finding.file, finding.snippet_start_line),
+                explanation=f"Mettre à jour {dep.package} de {dep.version} vers {dep.fixed_version} (version qui corrige "
+                            f"les {count} vulnérabilité(s) connue(s)), puis relancer les tests : une montée de version "
+                            f"majeure peut introduire des changements incompatibles.",
+                best_practices=[
+                    "Automatiser les mises à jour de dépendances (Dependabot, Renovate).",
+                    "Versionner le fichier de verrouillage (lockfile).",
+                ],
+            )
+        return AIReview(
+            verdict="true_positive", confidence=1.0,
+            reason="Version présente dans une base publique de vulnérabilités connues.",
+            explanation=Explanation(
+                definition=f"La version {dep.version} de {dep.package} est concernée par {count} vulnérabilité(s) "
+                           f"publiée(s) : {summaries}.",
+                attack_scenario="Les vulnérabilités publiées sont documentées publiquement : un attaquant peut "
+                                "rechercher les applications qui utilisent cette version et cibler les points "
+                                "d'entrée qui exploitent le composant.",
+                business_impact="Selon la vulnérabilité : fuite de données, interruption de service ou prise de "
+                                "contrôle, avec des obligations de notification (RGPD) en cas de fuite.",
+                difficulty="variable",
+                references=[a.url for a in dep.advisories[:5]],
+            ),
+            fix=fix, model="Base OSV (sans IA)", generated_by="osv",
+        )
+
     def review_dependency(self, finding: Finding) -> AIReview:
         dep = finding.dependency
         assert dep is not None

@@ -13,6 +13,14 @@ export function SeverityBadge({ severity }: { severity: Severity }) {
 }
 
 export function VerdictBadge({ ai }: { ai: AIReview }) {
+  if (ai.generated_by === "osv") {
+    return (
+      <span className="badge" title="Explication générée depuis la base de vulnérabilités, sans appel IA">
+        <span aria-hidden>▤</span>
+        Base OSV
+      </span>
+    );
+  }
   const icon = ai.verdict === "true_positive" ? "✓" : ai.verdict === "false_positive" ? "✕" : "?";
   return (
     <span className={`badge verdict-${ai.verdict}`} title={ai.reason}>

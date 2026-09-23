@@ -8,18 +8,28 @@ from collections.abc import Callable
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from pathlib import Path
 
-from .ai.enricher import AIUnavailable, Enricher
+from .ai.enricher import AIUnavailable, BudgetExceeded, Enricher
 from .analyzers import sast, sca, secrets
 from .analyzers.context import enclosing_excerpt, file_header
 from .analyzers.rules import RULES_BY_ID
 from .config import Settings
 from .ingest import MANIFEST_FILES, CodeBase, SourceFile, Workspace, collect_codebase
-from .models import DependencyInfo, Finding, Scan, SecretInfo, Severity, now_iso
+from .models import SEVERITY_ORDER, DependencyInfo, Finding, Scan, SecretInfo, Severity, now_iso
 from .scoring import apply_severity, project_score
 from .storage import Storage
 from .taxonomy import CWE_DEPENDENCY, owasp_for
 
 log = logging.getLogger(__name__)
+
+
+# Points d'entrée (routes HTTP, lecture des entrées) : les fichiers qui en ont sont relus en priorité
+_ENTRY_POINT = re.compile(
+    r"@app\.route|@\w+\.(get|post|put|delete|route)\(|\bapp\.(get|post|put|delete|use)\(|router\.\w+\(|"
+    r"request\.(args|form|json|get_data)|req\.(query|params|body)|\$_(GET|POST|REQUEST|COOKIE)|"
+    r"getParameter\(|@(Get|Post|Request)Mapping"
+)
+
+_KIND_PRIORITY = {"sast": 0, "ai": 0, "secret": 0, "dependency": 1}
 
 
 def new_id() -> str:
@@ -96,6 +106,7 @@ class ScanService:
 
         findings = self._apply_dismissals(scan, findings)
         self._enrich(scan, findings, redacted, enricher)
+        self._record_ai_usage(scan, enricher)
 
         self._progress(scan, "Calcul du score", 0.97)
         for f in findings:
@@ -223,11 +234,22 @@ class ScanService:
 
     def _logic(self, scan: Scan, findings: list[Finding], redacted: dict, enricher: Enricher) -> list[Finding]:
         """Revue IA de chaque fichier de code pour les failles logiques non couvertes par les règles."""
-        sources = [
+        candidates = [
             src for path, src in redacted.items()
             if path.split("/")[-1] not in MANIFEST_FILES
             and src.content.count("\n") < self.settings.secuscan_logic_max_lines
-        ][: self.settings.secuscan_logic_max_files]
+        ]
+        # Budget : au plus une part des appels, en commençant par les fichiers exposés (routes, entrées)
+        limit = min(
+            self.settings.secuscan_logic_max_files,
+            int(enricher.budget.max_calls * self.settings.secuscan_logic_budget_share),
+        )
+        candidates.sort(key=lambda s: (-len(_ENTRY_POINT.findall(s.content)), s.path))
+        sources = candidates[:limit]
+        if skipped := len(candidates) - len(sources):
+            scan.summary.warnings.append(
+                f"Revue logique IA limitée aux {len(sources)} fichiers les plus exposés ({skipped} non relus)."
+            )
         if not sources:
             return []
         flagged: dict[str, list[int]] = {}
@@ -270,9 +292,24 @@ class ScanService:
         return results
 
     def _enrich(self, scan: Scan, findings: list[Finding], redacted: dict, enricher: Enricher) -> None:
-        todo = [f for f in findings if f.status == "open"]
-        if not todo:
-            return
+        # Priorité : le code avant les dépendances, du plus grave au moins grave (le budget s'épuise par la fin)
+        todo = sorted(
+            (f for f in findings if f.status == "open"),
+            key=lambda f: (_KIND_PRIORITY[f.kind], SEVERITY_ORDER[f.severity]),
+        )
+        # Dépendances : l'IA n'explique que les plus graves, les autres reçoivent une explication OSV locale
+        severe_deps = [
+            f for f in todo if f.kind == "dependency" and f.severity in (Severity.critical, Severity.high)
+        ]
+        deps_for_ai = (
+            {f.id for f in severe_deps[: self.settings.secuscan_ai_max_dependency_reviews]}
+            if self.settings.ai_enabled else set()
+        )
+        for f in todo:
+            if f.kind == "dependency" and f.id not in deps_for_ai:
+                f.ai = Enricher.local_dependency_review(f)
+        todo = [f for f in todo if f.ai is None]
+
         headers = {path: file_header(src.content.split("\n")) for path, src in redacted.items()}
         self._progress(scan, f"Enrichissement IA (0/{len(todo)})", 0.5)
 
@@ -281,13 +318,16 @@ class ScanService:
                 return enricher.review_dependency(f)
             return enricher.review_code_finding(f, headers.get(f.file, ""))
 
-        errors = 0
+        errors = refused = 0
         with ThreadPoolExecutor(max_workers=max(1, self.settings.secuscan_ai_concurrency)) as pool:
             futures = {pool.submit(work, f): f for f in todo}
             for done, future in enumerate(as_completed(futures), start=1):
                 f = futures[future]
                 try:
                     f.ai = future.result()
+                except BudgetExceeded as exc:
+                    f.ai_error = str(exc)
+                    refused += 1
                 except AIUnavailable as exc:
                     f.ai_error = str(exc)
                     errors += 1
@@ -296,17 +336,33 @@ class ScanService:
                     f.ai_error = f"Erreur IA : {exc}"
                     errors += 1
                 self._progress(scan, f"Enrichissement IA ({done}/{len(todo)})", 0.5 + 0.45 * done / len(todo))
-        scan.summary.ai_calls = enricher.stats.calls
-        scan.summary.ai_cache_hits = enricher.stats.cache_hits
-        scan.summary.ai_tokens = enricher.stats.tokens
-        scan.summary.ai_errors = errors
-        if errors == len(todo) and not self.settings.ai_enabled:
-            scan.summary.warnings.append(
+
+        s = scan.summary
+        s.ai_errors = errors + refused
+        s.ai_budget_refused = refused
+        if not self.settings.ai_enabled and errors:
+            s.warnings.append(
                 "IA non configurée : ni validation des faux positifs, ni revue logique ; "
                 "les explications et correctifs affichés sont ceux, génériques, des règles."
             )
         elif errors:
-            scan.summary.warnings.append(f"{errors} alerte(s) sans analyse IA (service IA indisponible).")
+            s.warnings.append(f"{errors} alerte(s) sans analyse IA (service IA indisponible).")
+        if refused:
+            max_calls, max_tokens = self.settings.ai_budget
+            s.warnings.append(
+                f"Budget IA atteint (offre {self.settings.secuscan_plan} : {max_calls} appels / "
+                f"{max_tokens // 1000} k jetons par analyse) : {refused} alerte(s) parmi les moins graves "
+                f"affichées avec l'explication générique de leur règle."
+            )
+
+    def _record_ai_usage(self, scan: Scan, enricher: Enricher) -> None:
+        s = scan.summary
+        s.ai_calls = enricher.stats.calls
+        s.ai_cache_hits = enricher.stats.cache_hits
+        s.ai_tokens = enricher.stats.tokens
+        s.ai_cost_usd = round(enricher.stats.cost_usd(self.settings), 4)
+        s.ai_budget_calls = enricher.budget.max_calls
+        s.plan = self.settings.secuscan_plan
 
     def _compare_with_previous(self, scan: Scan, findings: list[Finding]) -> None:
         previous = self.storage.previous_completed_scan(scan.project_name, scan.created_at)
