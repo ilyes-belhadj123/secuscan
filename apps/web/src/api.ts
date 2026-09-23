@@ -88,6 +88,7 @@ export interface ScanSummary {
   ai_cache_hits: number;
   ai_tokens: number;
   ai_errors: number;
+  warnings: string[];
   duration_seconds: number;
 }
 

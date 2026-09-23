@@ -83,9 +83,21 @@ def parse_package_lock(m: ManifestFile) -> list[Dependency]:
         return []
     deps = []
     for key, info in (data.get("packages") or {}).items():
-        if key.startswith("node_modules/") and isinstance(info, dict) and info.get("version"):
+        if not (key.startswith("node_modules/") and isinstance(info, dict)):
+            continue
+        if version := _clean_version(str(info.get("version", ""))):
             name = key.split("node_modules/")[-1]
-            deps.append(Dependency("npm", name, info["version"], m.path, _line_of(m.content, f'"{key}"')))
+            deps.append(Dependency("npm", name, version, m.path, _line_of(m.content, f'"{key}"')))
+    if not deps:
+        # Format lockfile v1 : arbre "dependencies" imbriqué
+        stack = list((data.get("dependencies") or {}).items())
+        while stack:
+            name, info = stack.pop()
+            if not isinstance(info, dict):
+                continue
+            if version := _clean_version(str(info.get("version", ""))):
+                deps.append(Dependency("npm", name, version, m.path, _line_of(m.content, f'"{name}"')))
+            stack.extend((info.get("dependencies") or {}).items())
     return deps
 
 
@@ -169,10 +181,14 @@ _OSV_SEVERITY = {"CRITICAL": Severity.critical, "HIGH": Severity.high, "MODERATE
                  "MEDIUM": Severity.medium, "LOW": Severity.low}
 
 
+OSV_BATCH_SIZE = 500  # l'API refuse les lots de plus de 1 000 requêtes
+
+
 class OSVClient:
     def __init__(self, storage: Storage, offline: bool = False):
         self.storage = storage
         self.offline = offline
+        self.errors: list[str] = []  # remontées à l'utilisateur : ne jamais échouer en silence
 
     def _get_json(self, method: str, url: str, **kwargs):
         with httpx.Client(timeout=20) as client:
@@ -189,20 +205,31 @@ class OSVClient:
                 result[i] = cached
             else:
                 missing.append(i)
-        if missing and not self.offline:
-            queries = [
-                {"package": {"name": deps[i].name, "ecosystem": deps[i].ecosystem}, "version": deps[i].version}
-                for i in missing
-            ]
-            try:
-                data = self._get_json("POST", OSV_QUERYBATCH, json={"queries": queries})
-                for i, res in zip(missing, data.get("results", []), strict=False):
+        if missing and self.offline:
+            self.errors.append(f"{len(missing)} dépendance(s) non vérifiée(s) : mode hors ligne et absentes du cache.")
+        elif missing:
+            failed = 0
+            for start in range(0, len(missing), OSV_BATCH_SIZE):
+                chunk = missing[start : start + OSV_BATCH_SIZE]
+                queries = [
+                    {"package": {"name": deps[i].name, "ecosystem": deps[i].ecosystem}, "version": deps[i].version}
+                    for i in chunk
+                ]
+                try:
+                    data = self._get_json("POST", OSV_QUERYBATCH, json={"queries": queries})
+                except httpx.HTTPError as exc:
+                    log.warning("OSV indisponible : %s", exc)
+                    failed += len(chunk)
+                    continue
+                for i, res in zip(chunk, data.get("results", []), strict=False):
                     ids = [v["id"] for v in res.get("vulns") or []]
                     dep = deps[i]
                     self.storage.cache_set("osv-query", f"{dep.ecosystem}|{dep.name}|{dep.version}", ids)
                     result[i] = ids
-            except httpx.HTTPError as exc:
-                log.warning("OSV indisponible : %s", exc)
+            if failed:
+                self.errors.append(
+                    f"{failed} dépendance(s) sur {len(deps)} non vérifiée(s) : base de vulnérabilités OSV injoignable."
+                )
         return result
 
     def vuln(self, vuln_id: str) -> dict | None:
@@ -258,6 +285,8 @@ def scan_dependencies(deps: list[Dependency], client: OSVClient) -> list[Vulnera
     all_ids = sorted({vid for ids in ids_by_dep.values() for vid in ids})
     with ThreadPoolExecutor(max_workers=8) as pool:
         vulns = dict(zip(all_ids, pool.map(client.vuln, all_ids), strict=True))
+    if missing_details := sum(1 for v in vulns.values() if v is None):
+        client.errors.append(f"{missing_details} fiche(s) de vulnérabilité non récupérée(s) depuis OSV.")
 
     results = []
     for i, ids in ids_by_dep.items():

@@ -179,7 +179,9 @@ class ScanService:
             return []
         client = sca.OSVClient(self.storage, offline=self.settings.secuscan_offline)
         findings = []
-        for vuln in sca.scan_dependencies(deps, client):
+        vulnerable = sca.scan_dependencies(deps, client)
+        scan.summary.warnings += client.errors
+        for vuln in vulnerable:
             dep = vuln.dependency
             lines = redacted[dep.manifest].content.split("\n")
             if dep.ecosystem == "Maven":  # groupId / artifactId / version sur des lignes voisines
@@ -298,6 +300,13 @@ class ScanService:
         scan.summary.ai_cache_hits = enricher.stats.cache_hits
         scan.summary.ai_tokens = enricher.stats.tokens
         scan.summary.ai_errors = errors
+        if errors == len(todo) and not self.settings.ai_enabled:
+            scan.summary.warnings.append(
+                "IA non configurée : ni validation des faux positifs, ni revue logique ; "
+                "les explications et correctifs affichés sont ceux, génériques, des règles."
+            )
+        elif errors:
+            scan.summary.warnings.append(f"{errors} alerte(s) sans analyse IA (service IA indisponible).")
 
     def _compare_with_previous(self, scan: Scan, findings: list[Finding]) -> None:
         previous = self.storage.previous_completed_scan(scan.project_name, scan.created_at)

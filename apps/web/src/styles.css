@@ -165,6 +165,12 @@ label.field { display: flex; flex-direction: column; gap: 4px; font-weight: 600;
   box-shadow: var(--shadow); font-size: 12.5px; color: var(--text);
 }
 
+.warning-box {
+  border: 1px solid color-mix(in srgb, var(--sev-medium) 60%, transparent);
+  background: color-mix(in srgb, var(--sev-medium) 10%, var(--surface));
+  border-radius: var(--radius); padding: 12px 16px; font-size: 13.5px;
+}
+
 /* ---------- liste des alertes */
 .filters { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; }
 .chip {

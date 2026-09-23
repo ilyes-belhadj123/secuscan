@@ -141,6 +141,9 @@ def build_pdf(
         ("BOTTOMPADDING", (0, 0), (-1, -1), 8),
     ]))
     story += [summary, Spacer(1, 4 * mm)]
+    if s.warnings:
+        story.append(_p("Limites de cette analyse : " + " ".join(s.warnings), st["small"]))
+        story.append(Spacer(1, 3 * mm))
 
     if s.by_owasp:
         story.append(_p("Catégories OWASP Top 10 les plus représentées", st["h2"]))

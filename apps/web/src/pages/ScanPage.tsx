@@ -159,6 +159,13 @@ export default function ScanPage() {
         </div>
       </div>
 
+      {(s.warnings ?? []).length > 0 && (
+        <div className="warning-box" role="status">
+          <strong>⚠ Limites de cette analyse</strong>
+          <ul className="tight">{s.warnings.map((w) => <li key={w}>{w}</li>)}</ul>
+        </div>
+      )}
+
       <section className="grid-2" style={{ gridTemplateColumns: "minmax(0,0.9fr) minmax(0,1.1fr)" }}>
         <div className="card stack">
           <div className="hero-score">

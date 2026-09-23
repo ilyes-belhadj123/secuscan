@@ -94,7 +94,8 @@ renseignée dans `.env` (tout a été validé avec une IA simulée).
 
 | Date | Commit | Contenu |
 |---|---|---|
-| 23/09/2026 | (ce commit) | SS-8 benchmark + règles améliorées (détection 82 % → 98 %, faux positifs 9 % → 5 %) |
+| 23/09/2026 | (ce commit) | Correctif SCA trouvé sur un vrai projet (OWASP NodeGoat, 1 108 dépendances) : envoi par lots à OSV, lockfile v1, limites de l'analyse affichées (écran + PDF) au lieu d'échecs silencieux |
+| 23/09/2026 | `0e3a279` | SS-8 benchmark + règles améliorées (détection 82 % → 98 %, faux positifs 9 % → 5 %) |
 | 23/09/2026 | `f4aeb82` | Tableau de suivi des tickets |
 | 23/09/2026 | `4e31375` | Revue logique IA, import Git, marque blanche PDF, journal d'audit |
 | 23/09/2026 | `28f40da` | Version démo initiale (analyse 4 couches, tableau de bord, rapports) |

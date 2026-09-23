@@ -119,6 +119,8 @@ class ScanSummary(BaseModel):
     ai_cache_hits: int = 0
     ai_tokens: int = 0
     ai_errors: int = 0
+    # Limites de l'analyse à signaler à l'utilisateur (ex. base de vulnérabilités injoignable)
+    warnings: list[str] = Field(default_factory=list)
     duration_seconds: float = 0.0
 
 
