@@ -8,6 +8,7 @@ import {
 import CostsPage from "./pages/CostsPage";
 import FindingPage from "./pages/FindingPage";
 import HomePage from "./pages/HomePage";
+import OperatorPage from "./pages/OperatorPage";
 import OrgPage from "./pages/OrgPage";
 import PlanPage from "./pages/PlanPage";
 import ScanPage from "./pages/ScanPage";
@@ -62,6 +63,7 @@ function Topbar({ health }: { health: Health | null }) {
           {isAdmin(me) && <Link to="/audit" className="small" style={{ fontWeight: 600 }}>Journal d'audit</Link>}
           <Link to="/organisation" className="small" style={{ fontWeight: 600 }}>Équipe</Link>
           <Link to="/offre" className="small" style={{ fontWeight: 600 }}>Offre {me.org.plan_name}</Link>
+          {me.is_operator && <Link to="/operateur" className="small" style={{ fontWeight: 600 }}>Bêta</Link>}
         </>
       )}
       {health && (
@@ -103,6 +105,7 @@ export default function App() {
           <Route path="/audit" element={isAdmin(me) ? <AuditPage /> : <Navigate to="/" replace />} />
           <Route path="/organisation" element={<OrgPage />} />
           <Route path="/offre" element={<PlanPage />} />
+          <Route path="/operateur" element={me.is_operator ? <OperatorPage /> : <Navigate to="/" replace />} />
           <Route path="/invitation/:token" element={<InvitationPage />} />
           <Route path="/reinitialisation/:token" element={<ResetPasswordPage />} />
           <Route path="*" element={<Navigate to="/" replace />} />

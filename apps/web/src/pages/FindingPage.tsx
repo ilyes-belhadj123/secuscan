@@ -3,6 +3,7 @@ import { Link, useNavigate, useParams } from "react-router-dom";
 import { api, type Finding } from "../api";
 import { SeverityBadge, VerdictBadge } from "../components/Badges";
 import { CodeView, DiffView } from "../components/Code";
+import FixFeedback from "../components/FixFeedback";
 import { KIND_LABEL, LANGUAGE_LABEL, SEVERITY_LABEL } from "../labels";
 
 type Tab = "understand" | "fix" | "refs";
@@ -248,7 +249,10 @@ export default function FindingPage() {
                   <div className="row">
                     <button
                       className="btn btn-primary"
-                      onClick={() => navigator.clipboard.writeText(fix.patched_code).then(() => flash("Correctif copié"))}
+                      onClick={() => navigator.clipboard.writeText(fix.patched_code).then(() => {
+                        flash("Correctif copié");
+                        api.fixCopied(finding.id).catch(() => undefined);
+                      })}
                     >
                       ⧉ Copier le code corrigé
                     </button>
@@ -264,6 +268,7 @@ export default function FindingPage() {
                   <p className="small muted" style={{ margin: 0 }}>
                     Suggestion générée par IA : relisez-la et testez-la avant de l'intégrer.
                   </p>
+                  <FixFeedback findingId={finding.id} />
                 </>
               ) : (
                 <div className="explain-block"><h3>Correctif recommandé</h3><p>{finding.fix_hint ?? "—"}</p></div>

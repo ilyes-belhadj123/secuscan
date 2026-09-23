@@ -65,6 +65,9 @@ class Settings(BaseSettings):
     # Clé AES-256 (base64) qui chiffre les jetons d'accès stockés
     secuscan_token_key: str = ""
 
+    # Bêta (SS-21) : e-mails des opérateurs de la plateforme (tableau de bord toutes organisations)
+    secuscan_operator_emails: list[str] = []
+
     # Offres (SS-20)
     # Offre de la toute première organisation (propriétaire de l'installation) ; les suivantes : free
     secuscan_first_org_plan: str = "business"

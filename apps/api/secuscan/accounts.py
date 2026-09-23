@@ -87,6 +87,7 @@ def _me(service: ScanService, ctx: Context) -> dict:
         "org": {"id": ctx.org_id, "name": ctx.org_name, "role": ctx.role, "role_label": ROLE_LABELS[ctx.role],
                 "plan": plan.id, "plan_name": plan.name, "features": sorted(plan.features)},
         "organizations": service.storage.memberships_of(ctx.user_id),
+        "is_operator": ctx.email.lower() in {e.strip().lower() for e in service.settings.secuscan_operator_emails},
     }
 
 

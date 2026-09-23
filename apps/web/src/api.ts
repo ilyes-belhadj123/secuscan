@@ -181,6 +181,24 @@ export interface Me {
   user: { id: string; email: string; name: string };
   org: { id: string; name: string; role: Role; role_label: string; plan: PlanId; plan_name: string; features: string[] };
   organizations: { org_id: string; name: string; role: Role }[];
+  is_operator: boolean;
+}
+
+export type FixVerdict = "applied" | "helpful" | "not_helpful";
+
+export interface OperatorDashboard {
+  organizations: {
+    name: string; plan: string; created_at: string; members: number; scans: number; active_weeks: number;
+    returned: boolean; last_scan: string | null; feedback_total: number; acceptance_rate: number | null;
+    fix_copies: number;
+  }[];
+  totals: {
+    organizations: number; active: number; returned: number; feedback: number;
+    acceptance_rate: number | null; fix_copies: number; nps: number | null; survey_answers: number;
+  };
+  acceptance_by_kind: Record<string, { accepted: number; total: number }>;
+  comments: { verdict: FixVerdict; rule_id: string; comment: string }[];
+  surveys: { recommend: number; useful: string; missing: string; created_at: string }[];
 }
 
 export type Role = "owner" | "admin" | "member";
@@ -330,6 +348,14 @@ export const api = {
     request<Finding>(`/api/findings/${id}/dismiss`, json({ reason, justification })),
   audit: () => request<AuditEntry[]>("/api/audit"),
   billing: () => request<Billing>("/api/billing"),
+  fixFeedback: (id: string) => request<{ verdict: FixVerdict; comment: string } | null>(`/api/findings/${id}/feedback`),
+  sendFixFeedback: (id: string, verdict: FixVerdict, comment = "") =>
+    request(`/api/findings/${id}/feedback`, send("POST", { verdict, comment })),
+  fixCopied: (id: string) => request(`/api/findings/${id}/fix-copied`, send("POST")),
+  surveyStatus: () => request<{ due: boolean; answered: boolean }>("/api/beta/survey"),
+  sendSurvey: (recommend: number, useful: string, missing: string) =>
+    request("/api/beta/survey", send("POST", { recommend, useful, missing })),
+  operator: () => request<OperatorDashboard>("/api/operator/beta"),
   selectPlan: (plan: PlanId) => request<{ invoice: Invoice | null }>("/api/billing/plan", send("POST", { plan })),
   costs: () => request<Costs>("/api/costs"),
   reportUrl: (id: string, format: "pdf" | "json", options?: { preparedFor?: string; preparedBy?: string }) => {

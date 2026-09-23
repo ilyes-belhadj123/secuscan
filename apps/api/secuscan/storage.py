@@ -103,6 +103,33 @@ CREATE TABLE IF NOT EXISTS invoices (
     provider TEXT NOT NULL,
     created_at TEXT NOT NULL
 );
+CREATE TABLE IF NOT EXISTS fix_feedback (
+    org_id TEXT NOT NULL,
+    finding_id TEXT NOT NULL,
+    user_id TEXT NOT NULL,
+    rule_id TEXT NOT NULL,
+    kind TEXT NOT NULL,
+    verdict TEXT NOT NULL,
+    comment TEXT NOT NULL,
+    created_at TEXT NOT NULL,
+    PRIMARY KEY (finding_id, user_id)
+);
+CREATE TABLE IF NOT EXISTS fix_copies (
+    org_id TEXT NOT NULL,
+    finding_id TEXT NOT NULL,
+    user_id TEXT NOT NULL,
+    created_at TEXT NOT NULL,
+    PRIMARY KEY (finding_id, user_id)
+);
+CREATE TABLE IF NOT EXISTS surveys (
+    org_id TEXT NOT NULL,
+    user_id TEXT NOT NULL,
+    recommend INTEGER NOT NULL,
+    useful TEXT NOT NULL,
+    missing TEXT NOT NULL,
+    created_at TEXT NOT NULL,
+    PRIMARY KEY (org_id, user_id)
+);
 CREATE TABLE IF NOT EXISTS git_connections (
     org_id TEXT NOT NULL,
     user_id TEXT NOT NULL,
@@ -498,6 +525,59 @@ class Storage:
                 "DELETE FROM invitations WHERE id = ? AND org_id = ? AND accepted_at IS NULL", (invitation_id, org_id)
             )
         return cur.rowcount > 0
+
+    # --- Bêta : retours sur les correctifs et questionnaire (SS-21) ----
+    def save_fix_feedback(self, org_id: str, finding: Finding, user_id: str, verdict: str, comment: str) -> None:
+        with self._lock, self._conn() as conn:
+            conn.execute("INSERT OR REPLACE INTO fix_feedback VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+                         (org_id, finding.id, user_id, finding.rule_id, finding.kind, verdict, comment, now_iso()))
+
+    def record_fix_copy(self, org_id: str, finding_id: str, user_id: str) -> None:
+        with self._lock, self._conn() as conn:
+            conn.execute("INSERT OR IGNORE INTO fix_copies VALUES (?, ?, ?, ?)", (org_id, finding_id, user_id, now_iso()))
+
+    def fix_feedback_for(self, finding_id: str, user_id: str) -> dict | None:
+        with self._conn() as conn:
+            row = conn.execute("SELECT verdict, comment FROM fix_feedback WHERE finding_id = ? AND user_id = ?",
+                               (finding_id, user_id)).fetchone()
+        return {"verdict": row[0], "comment": row[1]} if row else None
+
+    def feedback_rows(self, org_id: str | None = None) -> list[dict]:
+        query, params = "SELECT org_id, rule_id, kind, verdict, comment, created_at FROM fix_feedback", []
+        if org_id is not None:
+            query, params = query + " WHERE org_id = ?", [org_id]
+        with self._conn() as conn:
+            rows = conn.execute(query, params).fetchall()
+        return [dict(zip(("org_id", "rule_id", "kind", "verdict", "comment", "created_at"), r, strict=True)) for r in rows]
+
+    def count_fix_copies(self, org_id: str | None = None) -> dict[str, int]:
+        query = "SELECT org_id, COUNT(*) FROM fix_copies"
+        with self._conn() as conn:
+            if org_id is not None:
+                rows = conn.execute(query + " WHERE org_id = ? GROUP BY org_id", (org_id,)).fetchall()
+            else:
+                rows = conn.execute(query + " GROUP BY org_id").fetchall()
+        return dict(rows)
+
+    def save_survey(self, org_id: str, user_id: str, recommend: int, useful: str, missing: str) -> None:
+        with self._lock, self._conn() as conn:
+            conn.execute("INSERT OR REPLACE INTO surveys VALUES (?, ?, ?, ?, ?, ?)",
+                         (org_id, user_id, recommend, useful, missing, now_iso()))
+
+    def has_answered_survey(self, org_id: str, user_id: str) -> bool:
+        with self._conn() as conn:
+            return conn.execute("SELECT 1 FROM surveys WHERE org_id = ? AND user_id = ?",
+                                (org_id, user_id)).fetchone() is not None
+
+    def survey_rows(self) -> list[dict]:
+        with self._conn() as conn:
+            rows = conn.execute("SELECT org_id, recommend, useful, missing, created_at FROM surveys").fetchall()
+        return [dict(zip(("org_id", "recommend", "useful", "missing", "created_at"), r, strict=True)) for r in rows]
+
+    def list_orgs(self) -> list[dict]:
+        with self._conn() as conn:
+            rows = conn.execute("SELECT id, name, created_at, plan FROM organizations ORDER BY created_at").fetchall()
+        return [dict(zip(("id", "name", "created_at", "plan"), r, strict=True)) for r in rows]
 
     # --- Connexions Git (SS-17) ----------------------------------------
     def save_git_connection(self, org_id: str, user_id: str, provider: str, login: str,

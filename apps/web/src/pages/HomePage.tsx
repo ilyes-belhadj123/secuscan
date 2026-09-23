@@ -2,6 +2,7 @@ import { useEffect, useRef, useState, type DragEvent } from "react";
 import { Link, useNavigate, useSearchParams } from "react-router-dom";
 import { ApiError, api, type Health, type Scan } from "../api";
 import GitRepoPicker from "../components/GitRepoPicker";
+import SurveyCard from "../components/SurveyCard";
 import { formatDate, grade } from "../labels";
 
 // Exemple volontairement vulnérable, prérempli dans « Coller du code »
@@ -89,6 +90,7 @@ export default function HomePage({ health }: { health: Health | null }) {
         </p>
       </section>
 
+      <SurveyCard />
       {gitNotice && (
         <div className={gitNotice.ok ? "ai-note" : "warning-box"} role="status">
           <span>{gitNotice.text}</span>

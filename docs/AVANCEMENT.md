@@ -9,8 +9,8 @@ Légende : ✅ fait · 🟡 partiel (voir « reste à faire ») · ⬜ à faire 
 | | Tickets |
 |---|---|
 | ✅ Fait | 18 |
-| 🟡 Partiel | 2 |
-| ⬜ À faire | 4 |
+| 🟡 Partiel | 3 |
+| ⬜ À faire | 3 |
 
 ## Qualité de détection (benchmark SS-8)
 
@@ -82,7 +82,7 @@ volontairement vulnérable « Acme Shop » (4 langages).
 
 | Ticket | Titre | Statut |
 |---|---|---|
-| SS-21 | Bêta 10 équipes pilotes | ⬜ |
+| SS-21 | Bêta 10 équipes pilotes | 🟡 outillage prêt : retours sur chaque correctif (taux d'acceptation), suivi des copies, questionnaire à J+14 (NPS), tableau de bord opérateur ; [guide des équipes](beta/guide-equipes-pilotes.md) et [plan de bêta](beta/plan-beta.md) — **reste : recruter les équipes et mener la bêta** (hébergement en ligne requis) |
 | SS-22 | Commentaires automatiques sur pull requests (V2) | ⬜ |
 | SS-23 | Job CI/CD bloquant (V2) | ✅ commande `secuscan scan` (seuil, codes retour documentés, `.secuscan.yml`, SARIF, suppression justifiée dans le code) ; [doc d'intégration](integration-ci.md) GitHub / GitLab ; SecuScan s'analyse lui-même en CI |
 | SS-24 | Mode formation (V2) | ⬜ |
@@ -98,7 +98,9 @@ volontairement vulnérable « Acme Shop » (4 langages).
 
 | Date | Commit | Contenu |
 |---|---|---|
-| 23/09/2026 | (ce commit) | SS-5 Bandit + adaptateur SARIF ; testé sur le projet réel DVPWA : SQL sur plusieurs lignes détecté, bibliothèques minifiées ignorées |
+| 23/09/2026 | (ce commit) | SS-21 outillage de la bêta (retours sur les correctifs, questionnaire, tableau de bord opérateur, guide et plan) |
+| 23/09/2026 | `9ce0946` | Sécurité : pom.xml lus avec defusedxml (trouvé par SecuScan sur lui-même) |
+| 23/09/2026 | `afb0922` | SS-5 Bandit + adaptateur SARIF ; testé sur le projet réel DVPWA : SQL sur plusieurs lignes détecté, bibliothèques minifiées ignorées |
 | 23/09/2026 | `f559e5e` | SS-17 OAuth GitHub / GitLab, dépôts privés, jetons chiffrés ; script `configure-secrets.ps1` |
 | 23/09/2026 | `21aacd3` | SS-23 CLI + SARIF + CI ; SecuScan s'analyse lui-même : correctif SCA (plages de package.json ignorées si lockfile) et react-router 6 → 7 (vulnérabilité GHSA-337j-9hxr-rhxg) |
 | 23/09/2026 | `5be0ed6` | E-mails (SMTP ou boîte d'envoi locale), invitations par e-mail, mot de passe oublié |
