@@ -2,7 +2,9 @@ import { useEffect, useState } from "react";
 import { Link, Navigate, Route, Routes, useNavigate } from "react-router-dom";
 import { api, type Health } from "./api";
 import AuditPage from "./pages/AuditPage";
-import { InvitationPage, LoginPage, RegisterPage } from "./pages/AuthPages";
+import {
+  ForgotPasswordPage, InvitationPage, LoginPage, RegisterPage, ResetPasswordPage,
+} from "./pages/AuthPages";
 import CostsPage from "./pages/CostsPage";
 import FindingPage from "./pages/FindingPage";
 import HomePage from "./pages/HomePage";
@@ -102,12 +104,15 @@ export default function App() {
           <Route path="/organisation" element={<OrgPage />} />
           <Route path="/offre" element={<PlanPage />} />
           <Route path="/invitation/:token" element={<InvitationPage />} />
+          <Route path="/reinitialisation/:token" element={<ResetPasswordPage />} />
           <Route path="*" element={<Navigate to="/" replace />} />
         </Routes>
       ) : (
         <Routes>
           <Route path="/connexion" element={<LoginPage />} />
           <Route path="/inscription" element={<RegisterPage />} />
+          <Route path="/mot-de-passe-oublie" element={<ForgotPasswordPage />} />
+          <Route path="/reinitialisation/:token" element={<ResetPasswordPage />} />
           <Route path="/invitation/:token" element={<InvitationPage />} />
           <Route path="*" element={<Navigate to="/connexion" replace />} />
         </Routes>

@@ -103,6 +103,13 @@ CREATE TABLE IF NOT EXISTS invoices (
     provider TEXT NOT NULL,
     created_at TEXT NOT NULL
 );
+CREATE TABLE IF NOT EXISTS password_resets (
+    token_hash TEXT PRIMARY KEY,
+    user_id TEXT NOT NULL,
+    expires_at REAL NOT NULL,
+    used_at TEXT,
+    created_at TEXT NOT NULL
+);
 CREATE TABLE IF NOT EXISTS sessions (
     token_hash TEXT PRIMARY KEY,
     user_id TEXT NOT NULL,
@@ -278,6 +285,33 @@ class Storage:
                 "SELECT id, email, name, password_hash FROM users WHERE email = ?", (email,)
             ).fetchone()
         return dict(zip(("id", "email", "name", "password_hash"), row, strict=True)) if row else None
+
+    def set_user_password(self, user_id: str, password_hash: str) -> None:
+        with self._lock, self._conn() as conn:
+            conn.execute("UPDATE users SET password_hash = ? WHERE id = ?", (password_hash, user_id))
+
+    # --- Réinitialisation du mot de passe ------------------------------
+    def create_password_reset(self, token_hash: str, user_id: str, expires_at: float) -> None:
+        with self._lock, self._conn() as conn:
+            # Une seule demande valide à la fois : les précédentes sont invalidées
+            conn.execute("DELETE FROM password_resets WHERE user_id = ? AND used_at IS NULL", (user_id,))
+            conn.execute("INSERT INTO password_resets VALUES (?, ?, ?, NULL, ?)",
+                         (token_hash, user_id, expires_at, now_iso()))
+
+    def get_password_reset(self, token_hash: str) -> dict | None:
+        with self._conn() as conn:
+            row = conn.execute(
+                "SELECT user_id, expires_at, used_at FROM password_resets WHERE token_hash = ?", (token_hash,)
+            ).fetchone()
+        return dict(zip(("user_id", "expires_at", "used_at"), row, strict=True)) if row else None
+
+    def use_password_reset(self, token_hash: str) -> None:
+        with self._lock, self._conn() as conn:
+            conn.execute("UPDATE password_resets SET used_at = ? WHERE token_hash = ?", (now_iso(), token_hash))
+
+    def delete_user_sessions(self, user_id: str) -> None:
+        with self._lock, self._conn() as conn:
+            conn.execute("DELETE FROM sessions WHERE user_id = ?", (user_id,))
 
     def get_user(self, user_id: str) -> dict | None:
         with self._conn() as conn:

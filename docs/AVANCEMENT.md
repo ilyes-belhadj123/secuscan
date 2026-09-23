@@ -43,7 +43,7 @@ volontairement vulnérable « Acme Shop » (4 langages).
 | Ticket | Titre | Statut | Réalisé | Reste à faire |
 |---|---|---|---|---|
 | SS-1 | Initialiser repos, CI et workers | 🟡 | Monorepo `apps/api` + `apps/web`, CI GitHub Actions (lint, tests, build) | Workers ARQ + Redis, images Docker (tâches en thread pour la démo) |
-| SS-2 | Comptes et organisations | ✅ | Inscription / connexion (scrypt, session en cookie HttpOnly, jetons stockés par empreinte, limitation des tentatives, protection CSRF), organisations, rôles propriétaire / admin / membre, invitations par lien à usage unique liées à l'e-mail, changement d'organisation ; **isolation multi-tenant testée** (analyses, alertes, rapports, coûts, audit, alertes ignorées) | Envoi des invitations par e-mail (SMTP), SSO (offre Business) |
+| SS-2 | Comptes et organisations | ✅ | Inscription / connexion (scrypt, session en cookie HttpOnly, jetons stockés par empreinte, limitation des tentatives, protection CSRF), organisations, rôles propriétaire / admin / membre, invitations par lien à usage unique liées à l'e-mail, changement d'organisation ; **isolation multi-tenant testée** (analyses, alertes, rapports, coûts, audit, alertes ignorées) ; invitations et **mot de passe oublié par e-mail** (SMTP, ou boîte d'envoi locale sans serveur) | Configurer un serveur SMTP réel ; SSO (offre Business) |
 | SS-3 | Upload ZIP et collage de code | ✅ | Limite 100 Mo, protection zip-slip / zip-bomb, détection des langages, suppression après analyse | Chiffrement du stockage temporaire |
 | SS-4 | Sandbox d'analyse éphémère | ⬜ | Le code analysé n'est jamais exécuté | Conteneur par scan sans réseau (Docker absent du poste de démo) |
 
@@ -89,8 +89,8 @@ volontairement vulnérable « Acme Shop » (4 langages).
 
 ## Prochaines étapes
 
-1. SS-17 — OAuth GitHub / GitLab pour les dépôts privés.
-2. Réinitialisation du mot de passe (nécessite l'envoi d'e-mails : SMTP).
+1. SS-23 — commande `secuscan` pour la CI (seuil de sévérité, code retour).
+2. SS-17 — OAuth GitHub / GitLab pour les dépôts privés.
 3. SS-5 — brancher un moteur SAST open source en complément des règles maison.
 4. Mise en ligne (hébergement HTTPS) : désormais possible grâce aux comptes.
 
@@ -98,7 +98,8 @@ volontairement vulnérable « Acme Shop » (4 langages).
 
 | Date | Commit | Contenu |
 |---|---|---|
-| 23/09/2026 | (ce commit) | SS-20 offres, quotas, changement d'offre, factures pro forma, webhook signé |
+| 23/09/2026 | (ce commit) | E-mails (SMTP ou boîte d'envoi locale), invitations par e-mail, mot de passe oublié |
+| 23/09/2026 | `a1b2e98` | SS-20 offres, quotas, changement d'offre, factures pro forma, webhook signé |
 | 23/09/2026 | `4132b5d` | SS-2 comptes, organisations, rôles, invitations, isolation multi-tenant ; SS-19 audit réservé aux admins ; interrupteur `SECUSCAN_AI_DISABLED` |
 | 23/09/2026 | `312720e` | SS-10 relecture de 30 explications IA, prompt v2 (environnement d'exécution, rien d'inventé, CWE précis), extraits sans accolade du bloc parent |
 | 23/09/2026 | `746bdce` | SS-11 vérification syntaxique des correctifs dans les 4 langages (89/89 valides) |

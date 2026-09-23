@@ -41,6 +41,13 @@ class Settings(BaseSettings):
     secuscan_public_url: str = "http://127.0.0.1:5173"
     # Cookie de session réservé au HTTPS : à activer dès que l'application est servie en HTTPS
     secuscan_cookie_secure: bool = False
+    # Envoi d'e-mails (invitations, réinitialisation) : vide = boîte d'envoi locale data/outbox
+    secuscan_smtp_host: str = ""
+    secuscan_smtp_port: int = 587
+    secuscan_smtp_user: str = ""
+    secuscan_smtp_password: str = ""
+    secuscan_smtp_starttls: bool = True
+    secuscan_smtp_from: str = "SecuScan <no-reply@example.com>"
     # Origines autorisées pour les requêtes qui modifient des données (protection CSRF)
     secuscan_allowed_origins: list[str] = ["http://127.0.0.1:5173", "http://localhost:5173"]
 

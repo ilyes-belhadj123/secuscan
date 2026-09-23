@@ -27,8 +27,8 @@ def service(settings) -> ScanService:
 def api(service):
     """Fabrique de clients HTTP : chaque client a ses propres cookies (un utilisateur = un navigateur)."""
     deps.set_service(service)
-    accounts.login_limiter.reset()
     accounts.login_limiter._failures.clear()
+    accounts.reset_limiter._failures.clear()
     yield lambda: TestClient(app)
     deps.set_service(None)
 

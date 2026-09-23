@@ -1,11 +1,12 @@
 """SS-2 — comptes, organisations, membres et invitations."""
 import time
 
-from fastapi import APIRouter, Depends, HTTPException, Request, Response
+from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Request, Response
 from pydantic import BaseModel, EmailStr, Field
 
 from .auth import (
     INVITATION_TTL_SECONDS,
+    PASSWORD_RESET_TTL_SECONDS,
     SESSION_TTL_SECONDS,
     LoginRateLimiter,
     hash_password,
@@ -16,11 +17,16 @@ from .auth import (
 )
 from .billing import check_member_quota
 from .deps import ROLE_LABELS, SESSION_COOKIE, Context, current_context, get_service, require_admin
+from .mailer import send_email
 from .pipeline import ScanService
 from .plans import QuotaExceeded, get_plan
 
 router = APIRouter(prefix="/api")
 login_limiter = LoginRateLimiter()
+reset_limiter = LoginRateLimiter(max_attempts=3, window_seconds=3600)
+
+RESET_ACK = ("Si un compte existe pour cette adresse, un e-mail contenant un lien de réinitialisation "
+             "(valable 1 heure) vient d'être envoyé.")
 
 
 class RegisterRequest(BaseModel):
@@ -33,6 +39,14 @@ class RegisterRequest(BaseModel):
 
 class LoginRequest(BaseModel):
     email: EmailStr
+    password: str = Field(max_length=200)
+
+
+class ResetRequest(BaseModel):
+    email: EmailStr
+
+
+class NewPasswordRequest(BaseModel):
     password: str = Field(max_length=200)
 
 
@@ -136,6 +150,51 @@ def logout(request: Request, response: Response, service: ScanService = Depends(
     return {"ok": True}
 
 
+@router.post("/auth/password-reset")
+def request_password_reset(body: ResetRequest, request: Request, tasks: BackgroundTasks,
+                           service: ScanService = Depends(get_service)):
+    """Toujours la même réponse, que le compte existe ou non (pas d'énumération des comptes).
+
+    L'e-mail part après la réponse : le temps de réponse ne révèle pas si le compte existe.
+    """
+    email = body.email.lower()
+    ip = request.client.host if request.client else "?"
+    keys = (f"reset:{email}", f"reset-ip:{ip}")
+    if reset_limiter.blocked(*keys):
+        raise HTTPException(429, "Trop de demandes. Réessayez dans une heure.")
+    reset_limiter.fail(*keys)  # chaque demande compte, qu'elle aboutisse ou non
+    user = service.storage.get_user_by_email(email)
+    if user:
+        token = new_token()
+        service.storage.create_password_reset(token_hash(token), user["id"], time.time() + PASSWORD_RESET_TTL_SECONDS)
+        link = f"{service.settings.secuscan_public_url.rstrip('/')}/reinitialisation/{token}"
+        tasks.add_task(send_email, service.settings, email, "SecuScan — réinitialisation de votre mot de passe", (
+            f"Bonjour {user['name']},\n\n"
+            "Une réinitialisation du mot de passe de votre compte SecuScan a été demandée.\n"
+            f"Pour choisir un nouveau mot de passe, ouvrez ce lien (valable 1 heure, à usage unique) :\n\n{link}\n\n"
+            "Si vous n'êtes pas à l'origine de cette demande, ignorez cet e-mail : votre mot de passe reste inchangé.\n"
+        ))
+    return {"detail": RESET_ACK}
+
+
+@router.post("/auth/password-reset/{token}")
+def reset_password(token: str, body: NewPasswordRequest, service: ScanService = Depends(get_service)):
+    storage = service.storage
+    reset = storage.get_password_reset(token_hash(token))
+    if not reset or reset["used_at"] or reset["expires_at"] < time.time():
+        raise HTTPException(404, "Lien de réinitialisation invalide ou expiré. Refaites une demande.")
+    if problem := password_problem(body.password):
+        raise HTTPException(400, problem)
+    storage.set_user_password(reset["user_id"], hash_password(body.password))
+    storage.use_password_reset(token_hash(token))
+    storage.delete_user_sessions(reset["user_id"])  # toutes les sessions ouvertes sont fermées
+    user = storage.get_user(reset["user_id"])
+    for membership in storage.memberships_of(reset["user_id"]):
+        storage.audit("member.password_reset", reset["user_id"], {"email": user["email"]},
+                      org_id=membership["org_id"], actor=user["email"])
+    return {"ok": True}
+
+
 @router.get("/auth/me")
 def me(ctx: Context = Depends(current_context), service: ScanService = Depends(get_service)):
     return _me(service, ctx)
@@ -174,8 +233,14 @@ def invite(body: InvitationRequest, ctx: Context = Depends(require_admin), servi
     inv = storage.create_invitation(ctx.org_id, email, body.role, token_hash(token),
                                     time.time() + INVITATION_TTL_SECONDS, ctx.user_id)
     storage.audit("member.invited", inv["id"], {"email": email, "role": body.role}, org_id=ctx.org_id, actor=ctx.email)
+    url = f"{service.settings.secuscan_public_url.rstrip('/')}/invitation/{token}"
+    delivery = send_email(service.settings, email, f"{ctx.name} vous invite à rejoindre {ctx.org_name} sur SecuScan", (
+        f"Bonjour,\n\n{ctx.name} ({ctx.email}) vous invite à rejoindre l'organisation « {ctx.org_name} » sur SecuScan, "
+        f"en tant que {ROLE_LABELS[body.role].lower()}.\n\n"
+        f"Pour accepter l'invitation (lien valable 7 jours, à usage unique) :\n\n{url}\n"
+    ))
     # Le lien n'est renvoyé qu'une fois : seule son empreinte est conservée en base
-    return {**inv, "url": f"{service.settings.secuscan_public_url.rstrip('/')}/invitation/{token}"}
+    return {**inv, "url": url, "email_sent": delivery.sent, "email_detail": delivery.detail}
 
 
 @router.delete("/org/invitations/{invitation_id}")

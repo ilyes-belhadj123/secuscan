@@ -14,6 +14,7 @@ export default function OrgPage() {
   const [email, setEmail] = useState("");
   const [role, setRole] = useState<Role>("member");
   const [inviteUrl, setInviteUrl] = useState<string | null>(null);
+  const [inviteMail, setInviteMail] = useState<{ sent: boolean; detail: string } | null>(null);
   const [copied, setCopied] = useState(false);
   const admin = isAdmin(me);
 
@@ -37,6 +38,7 @@ export default function OrgPage() {
     await run(async () => {
       const inv = await api.invite(email, role);
       setInviteUrl(inv.url);
+      setInviteMail({ sent: inv.email_sent, detail: inv.email_detail });
       setCopied(false);
       setEmail("");
     });
@@ -80,7 +82,11 @@ export default function OrgPage() {
           </form>
           {inviteUrl && (
             <div className="ai-note" style={{ flexDirection: "column", gap: 6 }}>
-              <span>Lien d'invitation (valable 7 jours, à usage unique) : transmettez-le à la personne invitée.</span>
+              <span>
+                {inviteMail?.sent
+                  ? "Invitation envoyée par e-mail. Lien (valable 7 jours, à usage unique), si besoin de le transmettre autrement :"
+                  : `E-mail non envoyé (${inviteMail?.detail}) : transmettez ce lien à la personne invitée (valable 7 jours, à usage unique).`}
+              </span>
               <div className="row" style={{ flexWrap: "nowrap" }}>
                 <input readOnly value={inviteUrl} className="mono small" onFocus={(e) => e.target.select()} />
                 <button className="btn" type="button"

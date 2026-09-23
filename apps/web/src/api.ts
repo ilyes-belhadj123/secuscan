@@ -273,10 +273,15 @@ export const api = {
   register: (body: { name: string; email: string; password: string; org_name?: string; invitation_token?: string }) =>
     request("/api/auth/register", send("POST", body)),
   logout: () => request("/api/auth/logout", send("POST")),
+  requestPasswordReset: (email: string) =>
+    request<{ detail: string }>("/api/auth/password-reset", send("POST", { email })),
+  resetPassword: (token: string, password: string) =>
+    request(`/api/auth/password-reset/${token}`, send("POST", { password })),
   switchOrg: (org_id: string) => request("/api/auth/switch-org", send("POST", { org_id })),
   org: () => request<OrgDetails>("/api/org"),
   invite: (email: string, role: Role) =>
-    request<{ url: string; email: string }>("/api/org/invitations", send("POST", { email, role })),
+    request<{ url: string; email: string; email_sent: boolean; email_detail: string }>(
+      "/api/org/invitations", send("POST", { email, role })),
   revokeInvitation: (id: string) => request(`/api/org/invitations/${id}`, send("DELETE")),
   changeRole: (userId: string, role: Role) => request(`/api/org/members/${userId}`, send("PATCH", { role })),
   removeMember: (userId: string) => request(`/api/org/members/${userId}`, send("DELETE")),

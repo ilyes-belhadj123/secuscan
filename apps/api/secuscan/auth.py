@@ -16,6 +16,7 @@ _SCRYPT = {"n": 2**14, "r": 8, "p": 1, "dklen": 32}
 MIN_PASSWORD_LENGTH = 10
 SESSION_TTL_SECONDS = 7 * 24 * 3600
 INVITATION_TTL_SECONDS = 7 * 24 * 3600
+PASSWORD_RESET_TTL_SECONDS = 3600
 
 
 def hash_password(password: str) -> str:

@@ -59,8 +59,108 @@ export function LoginPage() {
         </button>
       </form>
       <p className="small secondary" style={{ margin: 0 }}>
-        Pas encore de compte ? <Link to="/inscription">Créer une organisation</Link>
+        <Link to="/mot-de-passe-oublie">Mot de passe oublié ?</Link>
+        {" · "}Pas encore de compte ? <Link to="/inscription">Créer une organisation</Link>
       </p>
+    </AuthCard>
+  );
+}
+
+export function ForgotPasswordPage() {
+  const [email, setEmail] = useState("");
+  const [done, setDone] = useState<string | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  const [busy, setBusy] = useState(false);
+
+  async function submit(e: FormEvent) {
+    e.preventDefault();
+    setBusy(true);
+    setError(null);
+    try {
+      setDone((await api.requestPasswordReset(email)).detail);
+    } catch (err) {
+      setError((err as Error).message);
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  return (
+    <AuthCard title="Mot de passe oublié" subtitle="Recevez un lien pour choisir un nouveau mot de passe.">
+      {done ? (
+        <div className="ai-note" role="status"><span aria-hidden>✉</span><span>{done}</span></div>
+      ) : (
+        <form className="stack" onSubmit={submit} style={{ gap: 14 }}>
+          <label className="field">
+            Adresse e-mail du compte
+            <input type="email" autoComplete="email" required value={email} onChange={(e) => setEmail(e.target.value)} />
+          </label>
+          {error && <div className="error small" role="alert">{error}</div>}
+          <button className="btn btn-primary" type="submit" disabled={busy} style={{ justifyContent: "center" }}>
+            {busy ? <span className="spinner" /> : "Envoyer le lien"}
+          </button>
+        </form>
+      )}
+      <p className="small secondary" style={{ margin: 0 }}><Link to="/connexion">← Retour à la connexion</Link></p>
+    </AuthCard>
+  );
+}
+
+export function ResetPasswordPage() {
+  const { token = "" } = useParams();
+  const [password, setPassword] = useState("");
+  const [confirm, setConfirm] = useState("");
+  const [done, setDone] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [busy, setBusy] = useState(false);
+
+  async function submit(e: FormEvent) {
+    e.preventDefault();
+    if (password !== confirm) {
+      setError("Les deux mots de passe ne correspondent pas.");
+      return;
+    }
+    setBusy(true);
+    setError(null);
+    try {
+      await api.resetPassword(token, password);
+      setDone(true);
+    } catch (err) {
+      setError((err as Error).message);
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  return (
+    <AuthCard title="Nouveau mot de passe">
+      {done ? (
+        <>
+          <div className="ai-note" role="status">
+            <span aria-hidden>✓</span>
+            <span>Mot de passe modifié. Par sécurité, toutes vos sessions ont été fermées : reconnectez-vous.</span>
+          </div>
+          <Link className="btn btn-primary" to="/connexion" style={{ justifyContent: "center" }}>Se connecter</Link>
+        </>
+      ) : (
+        <form className="stack" onSubmit={submit} style={{ gap: 14 }}>
+          <label className="field">
+            Nouveau mot de passe
+            <input type="password" autoComplete="new-password" required value={password}
+                   onChange={(e) => setPassword(e.target.value)} />
+            <span className="small muted" style={{ fontWeight: 400 }}>{PASSWORD_HINT}</span>
+          </label>
+          <label className="field">
+            Confirmation
+            <input type="password" autoComplete="new-password" required value={confirm}
+                   onChange={(e) => setConfirm(e.target.value)} />
+          </label>
+          {error && <div className="error small" role="alert">{error}</div>}
+          <button className="btn btn-primary" type="submit" disabled={busy} style={{ justifyContent: "center" }}>
+            {busy ? <span className="spinner" /> : "Enregistrer le nouveau mot de passe"}
+          </button>
+        </form>
+      )}
     </AuthCard>
   );
 }
