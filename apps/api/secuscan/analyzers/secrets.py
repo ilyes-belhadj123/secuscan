@@ -43,7 +43,7 @@ SECRET_PATTERNS = [
     SecretPattern(
         "SECRET-GENERIC", "Mot de passe ou secret codé en dur",
         re.compile(
-            r"(?i)[\w$]*(password|passwd|pwd|secret|api_?key|access_?token|auth_?token)[\w]*"
+            r"(?i)[\w$]*(password|passwd|pwd|pass|secret|api_?key|access_?token|auth_?token)[\w]*"
             r"\s*[:=]\s*[\"']([^\"'\s]{8,})[\"']"
         ),
         Severity.high, 0, group=2,

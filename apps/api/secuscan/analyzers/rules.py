@@ -25,6 +25,8 @@ class Rule:
     context_requires: re.Pattern | None = None
     # Motif qui, s'il est présent dans le fichier, désactive la règle (mitigation déjà en place)
     file_excludes: re.Pattern | None = None
+    # Motif qui, s'il est présent sur la ligne, désactive la règle (ex. valeur échappée)
+    line_excludes: re.Pattern | None = None
     tags: tuple[str, ...] = field(default_factory=tuple)
 
 
@@ -33,6 +35,7 @@ def _r(pattern: str, flags: int = 0) -> re.Pattern:
 
 
 _SENSITIVE_CONTEXT = _r(r"token|secret|password|passwd|reset|otp|session|key|nonce|reference", re.I)
+_SQL = r"(?i:SELECT|INSERT|UPDATE|DELETE)\b"
 
 C, H, M, L = Severity.critical, Severity.high, Severity.medium, Severity.low
 
@@ -81,8 +84,22 @@ RULES: list[Rule] = [
         "Utiliser un template fixe et passer les données en variables de contexte.",
     ),
     Rule(
+        "PY-SQLI-BUILD", ("python",),
+        _r(rf"\"{_SQL}[^\"]*\"\s*(%|\+|\.format)|'{_SQL}[^']*'\s*(%|\+|\.format)|\bf[\"']{_SQL}[^\"']*\{{"),
+        "Injection SQL", "CWE-89", C,
+        "Une requête SQL est construite par concaténation ou interpolation avant d'être exécutée.",
+        "Utiliser des requêtes paramétrées : cursor.execute(\"... WHERE x = ?\", (valeur,)).",
+    ),
+    Rule(
+        "PY-REDIRECT", ("python",),
+        _r(r"\bredirect\(\s*request\.(args|form|values|GET|POST)"),
+        "Redirection ouverte", "CWE-601", M,
+        "La destination de la redirection provient directement de la requête.",
+        "N'accepter que des chemins relatifs internes ou une liste blanche de domaines.",
+    ),
+    Rule(
         "PY-PATH", ("python",),
-        _r(r"\bopen\(\s*os\.path\.join\(|send_file\(\s*request\.|send_from_directory\([^)]*request\."),
+        _r(r"\bopen\(\s*os\.path\.join\(|\bopen\([^)]*request\.|send_file\(\s*request\.|send_from_directory\([^)]*request\."),
         "Traversée de répertoire", "CWE-22", H,
         "Un chemin de fichier est construit à partir d'une donnée externe sans normalisation.",
         "Normaliser le chemin, vérifier qu'il reste dans le dossier autorisé, ou utiliser un identifiant.",
@@ -115,6 +132,27 @@ RULES: list[Rule] = [
         "Injection SQL", "CWE-89", C,
         "La requête SQL est construite par interpolation de chaînes.",
         "Utiliser les paramètres liés du driver : db.query(\"... WHERE x = $1\", [valeur]).",
+    ),
+    Rule(
+        "JS-SQLI-BUILD", JS_LANGS,
+        _r(rf"`{_SQL}[^`]*\$\{{|\"{_SQL}[^\"]*\"\s*\+|'{_SQL}[^']*'\s*\+"),
+        "Injection SQL", "CWE-89", C,
+        "Une requête SQL est construite par interpolation ou concaténation avant d'être exécutée.",
+        "Utiliser les paramètres liés du driver : db.query(\"... WHERE x = $1\", [valeur]).",
+    ),
+    Rule(
+        "JS-XSS-SERVER", JS_LANGS,
+        _r(r"\bres\.(send|write|end)\([^;]*req\.(query|params|body)"),
+        "Cross-site scripting (XSS)", "CWE-79", H,
+        "Une donnée de la requête est renvoyée telle quelle dans une réponse HTML.",
+        "Utiliser un moteur de templates qui échappe par défaut, ou échapper la valeur avant envoi.",
+    ),
+    Rule(
+        "JS-REDIRECT", JS_LANGS,
+        _r(r"\bres\.redirect\(\s*req\.(query|params|body)"),
+        "Redirection ouverte", "CWE-601", M,
+        "La destination de la redirection provient directement de la requête.",
+        "N'accepter que des chemins relatifs internes ou une liste blanche de domaines.",
     ),
     Rule(
         "JS-CMDI", JS_LANGS,
@@ -173,6 +211,22 @@ RULES: list[Rule] = [
         "Cross-site scripting (XSS)", "CWE-79", H,
         "Une donnée de la requête est renvoyée dans la page sans échappement.",
         "Échapper systématiquement avec htmlspecialchars($v, ENT_QUOTES, 'UTF-8').",
+        line_excludes=_r(r"htmlspecialchars|htmlentities|intval\(|\(int\)"),
+    ),
+    Rule(
+        "PHP-XSS-STORED", ("php",),
+        _r(r"\b(echo|print)\b[^;]*\.\s*\$(?!_)\w+\s*\["),
+        "Cross-site scripting (XSS) stocké", "CWE-79", M,
+        "Une valeur issue de la base ou d'un tableau est affichée sans échappement.",
+        "Échapper systématiquement avec htmlspecialchars($v, ENT_QUOTES, 'UTF-8').",
+        line_excludes=_r(r"htmlspecialchars|htmlentities|intval\(|\(int\)"),
+    ),
+    Rule(
+        "PHP-REDIRECT", ("php",),
+        _r(r"\bheader\(\s*[\"']Location:[^;]*\$_(GET|POST|REQUEST)"),
+        "Redirection ouverte", "CWE-601", M,
+        "La destination de la redirection provient directement de la requête.",
+        "N'accepter que des chemins relatifs internes ou une liste blanche de domaines.",
     ),
     Rule(
         "PHP-CMDI", ("php",),
@@ -180,6 +234,7 @@ RULES: list[Rule] = [
         "Injection de commande système", "CWE-78", C,
         "Une commande système est construite avec une variable.",
         "Éviter le shell ; sinon escapeshellarg() et liste blanche des valeurs.",
+        line_excludes=_r(r"escapeshellarg|escapeshellcmd"),
     ),
     Rule(
         "PHP-LFI", ("php",),
@@ -210,6 +265,34 @@ RULES: list[Rule] = [
         "Injection SQL", "CWE-89", C,
         "La requête SQL est construite par concaténation de chaînes.",
         "Utiliser PreparedStatement avec des paramètres (?) et setString().",
+    ),
+    Rule(
+        "JAVA-SQLI-BUILD", ("java",),
+        _r(rf"\"{_SQL}[^\"]*\"\s*\+"),
+        "Injection SQL", "CWE-89", C,
+        "Une requête SQL est construite par concaténation avant d'être exécutée.",
+        "Utiliser PreparedStatement avec des paramètres (?) et setString().",
+    ),
+    Rule(
+        "JAVA-XSS", ("java",),
+        _r(r"getWriter\(\)\.(print|println|write)\([^;]*getParameter\("),
+        "Cross-site scripting (XSS)", "CWE-79", H,
+        "Un paramètre de la requête est écrit tel quel dans la réponse HTML.",
+        "Échapper la sortie (ex. OWASP Java Encoder : Encode.forHtml) ou utiliser un moteur de templates.",
+    ),
+    Rule(
+        "JAVA-REDIRECT", ("java",),
+        _r(r"sendRedirect\([^;]*getParameter\("),
+        "Redirection ouverte", "CWE-601", M,
+        "La destination de la redirection provient directement de la requête.",
+        "N'accepter que des chemins relatifs internes ou une liste blanche de domaines.",
+    ),
+    Rule(
+        "JAVA-PATH", ("java",),
+        _r(r"new\s+File(InputStream|Reader)?\([^;]*getParameter\(|Paths\.get\([^;]*getParameter\("),
+        "Traversée de répertoire", "CWE-22", H,
+        "Un chemin de fichier est construit à partir d'un paramètre de la requête.",
+        "Normaliser le chemin (toRealPath) et vérifier qu'il reste dans le dossier autorisé.",
     ),
     Rule(
         "JAVA-CMDI", ("java",),

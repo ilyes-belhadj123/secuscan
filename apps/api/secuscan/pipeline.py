@@ -153,7 +153,8 @@ class ScanService:
                 continue
             lines = source.content.split("\n")
             for raw in sast.analyze_file(source):
-                key = (raw.rule_id, raw.file, raw.start_line)
+                # Deux règles qui signalent la même faille (même CWE) sur la même ligne : une seule alerte
+                key = (raw.cwe, raw.file, raw.start_line)
                 if key in seen:
                     continue
                 seen.add(key)

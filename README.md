@@ -88,3 +88,10 @@ source (SS-5 : l'adaptateur est prévu dans `analyzers/sast.py`).
 cd apps/api; uv run python -m pytest -q; uv run ruff check .
 cd apps/web; npm run build
 ```
+
+Benchmark de détection (SS-8) — corpus et vérité terrain dans `benchmark/` :
+
+```powershell
+cd apps/api; uv run python -m secuscan.benchmark        # règles seules (hors ligne)
+cd apps/api; uv run python -m secuscan.benchmark --ai   # règles + IA (clé requise)
+```

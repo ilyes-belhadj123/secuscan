@@ -3,6 +3,8 @@ name: CI
 on:
   push:
   pull_request:
+  schedule:
+    - cron: "0 2 * * *"  # benchmark nocturne (SS-8)
 
 jobs:
   api:
@@ -16,6 +18,26 @@ jobs:
       - run: uv sync
       - run: uv run ruff check .
       - run: uv run python -m pytest -q
+
+  benchmark:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: apps/api
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v6
+      - run: uv sync
+      - name: Benchmark de détection (règles seules)
+        run: uv run python -m secuscan.benchmark --min-recall 0.9
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: benchmark-report
+          path: benchmark/results/latest-rules.md
+      - name: Résumé
+        if: always()
+        run: cat ../../benchmark/results/latest-rules.md >> "$GITHUB_STEP_SUMMARY"
 
   web:
     runs-on: ubuntu-latest

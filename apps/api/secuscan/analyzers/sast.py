@@ -41,8 +41,11 @@ def analyze_file(source: SourceFile, rules: list[Rule] = RULES) -> list[RawFindi
         for rule in applicable:
             if not rule.pattern.search(line):
                 continue
+            if rule.line_excludes and rule.line_excludes.search(line):
+                continue
             if rule.context_requires:
-                window = "\n".join(lines[max(0, idx - 3) : idx + 4])
+                # La ligne et les 3 précédentes (typiquement la signature de la fonction)
+                window = "\n".join(lines[max(0, idx - 3) : idx + 1])
                 if not rule.context_requires.search(window):
                     continue
             results.append(

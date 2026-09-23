@@ -8,9 +8,24 @@ Légende : ✅ fait · 🟡 partiel (voir « reste à faire ») · ⬜ à faire 
 
 | | Tickets |
 |---|---|
-| ✅ Fait | 10 |
+| ✅ Fait | 11 |
 | 🟡 Partiel | 6 |
-| ⬜ À faire | 8 |
+| ⬜ À faire | 7 |
+
+## Qualité de détection (benchmark SS-8)
+
+Mesure du 23/09/2026 sur 83 failles annotées (4 langages) — rapport complet :
+[benchmark/results/latest-rules.md](../benchmark/results/latest-rules.md)
+
+| Mode | Taux de détection | Taux de faux positifs | Objectif cahier des charges |
+|---|---|---|---|
+| Règles seules | **98 %** (81/83) | **5 %** (4) | > 85 % / < 15 % |
+| Règles + IA | à mesurer (clé requise) | à mesurer | |
+
+Les 2 failles manquées en règles seules sont des failles logiques (IDOR, prix fourni par le client)
+que seule la revue IA peut trouver ; les 4 faux positifs sont des cas que la validation IA doit écarter.
+⚠️ Le corpus a été écrit par l'équipe qui écrit les règles : ces chiffres sont optimistes. Prochaine
+étape : ajouter des applications vulnérables open source externes (NodeGoat, DVWA, WebGoat) annotées.
 
 Réalisé en plus des tickets : **revue logique par l'IA** (couche 4 du cahier des charges : failles
 qu'aucune règle ne détecte, ex. IDOR), **commande de préparation de la démo**, projet de démonstration
@@ -32,16 +47,16 @@ renseignée dans `.env` (tout a été validé avec une IA simulée).
 
 | Ticket | Titre | Statut | Réalisé | Reste à faire |
 |---|---|---|---|---|
-| SS-5 | Moteur de règles statiques | 🟡 | ~30 règles maison (Python, JS/TS, PHP, Java), findings normalisés (fichier, lignes, CWE, OWASP), interface d'adaptateur | Brancher un moteur SAST open source (SARIF) |
+| SS-5 | Moteur de règles statiques | 🟡 | 41 règles maison (Python, JS/TS, PHP, Java) avec exclusions par ligne, findings normalisés (fichier, lignes, CWE, OWASP), interface d'adaptateur | Brancher un moteur SAST open source (SARIF) |
 | SS-6 | Détection de secrets | ✅ | Motifs + entropie, valeur jamais stockée ni envoyée à l'IA (masque + empreinte), testé | — |
 | SS-7 | Analyse des dépendances (SCA) | ✅ | requirements / pyproject, package.json / lock, composer, pom.xml ; base OSV.dev + cache ; version corrigée | — |
-| SS-8 | Jeu de référence (benchmark) | ⬜ | — | Corpus annoté, calcul rappel / faux positifs, job CI nocturne |
+| SS-8 | Jeu de référence (benchmark) | ✅ | Corpus annoté 4 langages (cas vulnérables + cas sûrs), `python -m secuscan.benchmark` (détection, faux positifs, mode `--ai`), job CI nocturne + garde-fou de non-régression | Corpus externes (NodeGoat, DVWA, WebGoat) |
 
 ## Sprint 3 — IA
 
 | Ticket | Titre | Statut | Réalisé | Reste à faire |
 |---|---|---|---|---|
-| SS-9 | Validation contextuelle des alertes | 🟡 | Extraction de la fonction englobante, verdict JSON, faux positifs masqués | Mesure < 15 % de faux positifs (nécessite SS-8 + vrai modèle) |
+| SS-9 | Validation contextuelle des alertes | 🟡 | Extraction de la fonction englobante, verdict JSON, faux positifs masqués | Mesure < 15 % de faux positifs : `benchmark --ai` avec le vrai modèle |
 | SS-10 | Explication pédagogique | 🟡 | Prompt français, scénario conceptuel, filtre de sortie anti-charge offensive | Relecture de 30 explications générées par le vrai modèle |
 | SS-11 | Proposition de correctif | 🟡 | Diff avant/après, bouton copier, vérification syntaxique (Python) | Vérification JS/PHP/Java, mesure 80 % de correctifs valides |
 | SS-12 | Maîtrise des coûts IA | 🟡 | Cache par empreinte, extraits ciblés, compteur d'appels / jetons par scan | Budget et plafonds par offre |
@@ -70,13 +85,16 @@ renseignée dans `.env` (tout a été validé avec une IA simulée).
 
 ## Prochaines étapes
 
-1. SS-8 — benchmark : chiffres de rappel et de faux positifs à présenter au client.
-2. Test avec le vrai modèle (dès que la clé est dans `.env`), puis SS-9 / SS-10 / SS-11 mesurés.
-3. SS-12 — plafonds de coût IA par analyse.
+1. Test avec le vrai modèle (dès que la clé est dans `.env`) : `prepare_demo`, puis
+   `benchmark --ai` pour mesurer SS-9 / SS-10 / SS-11.
+2. SS-12 — plafonds de coût IA par analyse.
+3. SS-11 — vérification syntaxique des correctifs JS / PHP / Java.
 
 ## Historique
 
 | Date | Commit | Contenu |
 |---|---|---|
+| 23/09/2026 | (ce commit) | SS-8 benchmark + règles améliorées (détection 82 % → 98 %, faux positifs 9 % → 5 %) |
+| 23/09/2026 | `f4aeb82` | Tableau de suivi des tickets |
 | 23/09/2026 | `4e31375` | Revue logique IA, import Git, marque blanche PDF, journal d'audit |
 | 23/09/2026 | `28f40da` | Version démo initiale (analyse 4 couches, tableau de bord, rapports) |

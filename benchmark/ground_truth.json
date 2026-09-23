@@ -1,0 +1,120 @@
+{
+  "description": "Vérité terrain du benchmark SecuScan. Chaque faille attendue est repérée par un extrait unique de la ligne concernée ('contains') et son CWE. Toute alerte ouverte qui ne correspond à aucune entrée est comptée comme faux positif.",
+  "sources": [
+    {
+      "name": "corpus",
+      "path": "benchmark/corpus",
+      "expected": {
+        "python/orders_api.py": [
+          {"contains": "SMTP_PASSWORD = \"Bench", "cwe": "CWE-798"},
+          {"contains": "WHERE name = '%s'\" % name", "cwe": "CWE-89"},
+          {"contains": "WHERE email = '\" + email", "cwe": "CWE-89"},
+          {"contains": "os.popen(\"ls -la \" + folder)", "cwe": "CWE-78"},
+          {"contains": "shell=True, check=True", "cwe": "CWE-78"},
+          {"contains": "eval(request.form", "cwe": "CWE-95"},
+          {"contains": "pickle.loads(request.get_data())", "cwe": "CWE-502"},
+          {"contains": "Loader=yaml.Loader", "cwe": "CWE-502"},
+          {"contains": "render_template_string(f\"", "cwe": "CWE-1336"},
+          {"contains": "redirect(request.args.get(\"next\"", "cwe": "CWE-601"},
+          {"contains": "open(\"/srv/reports/\" + request.args", "cwe": "CWE-22"},
+          {"contains": "hashlib.md5(password.encode())", "cwe": "CWE-916"},
+          {"contains": "verify=False", "cwe": "CWE-295"}
+        ],
+        "javascript/shop_server.js": [
+          {"contains": "cors({ origin: \"*\" })", "cwe": "CWE-942"},
+          {"contains": "WHERE id = \" + req.params.id", "cwe": "CWE-89"},
+          {"contains": "WHERE customer = '${req.query.customer}'", "cwe": "CWE-89"},
+          {"contains": "exec(\"git log --oneline \" + req.query.branch", "cwe": "CWE-78"},
+          {"contains": "eval(req.body.formula)", "cwe": "CWE-95"},
+          {"contains": "new Function(\"price\"", "cwe": "CWE-95"},
+          {"contains": "res.send(\"<h1>Résultats pour \" + req.query.q", "cwe": "CWE-79"},
+          {"contains": "fs.readFile(\"./exports/\" + req.query.name", "cwe": "CWE-22"},
+          {"contains": "res.redirect(req.query.returnTo)", "cwe": "CWE-601"},
+          {"contains": "return Math.random().toString(36)", "cwe": "CWE-338"}
+        ],
+        "typescript/notifications.ts": [
+          {"contains": "root.innerHTML =", "cwe": "CWE-79"},
+          {"contains": "document.write(\"<p>Reçu", "cwe": "CWE-79"},
+          {"contains": "setTimeout(\"refreshWidget", "cwe": "CWE-95"},
+          {"contains": "el.insertAdjacentHTML(", "cwe": "CWE-79"}
+        ],
+        "php/account.php": [
+          {"contains": "$db_pass = \"Bench", "cwe": "CWE-798"},
+          {"contains": "$pdo->query(\"SELECT * FROM accounts WHERE id = \" . $_GET", "cwe": "CWE-89"},
+          {"contains": "DELETE FROM carts WHERE id = $id", "cwe": "CWE-89"},
+          {"contains": "echo \"Bonjour \" . $_GET['name'];", "cwe": "CWE-79"},
+          {"contains": "print $_POST['comment'];", "cwe": "CWE-79"},
+          {"contains": "system(\"convert \" . $file", "cwe": "CWE-78"},
+          {"contains": "include $_GET['page'];", "cwe": "CWE-98"},
+          {"contains": "unserialize($_COOKIE['cart'])", "cwe": "CWE-502"},
+          {"contains": "header(\"Location: \" . $_GET['next'])", "cwe": "CWE-601"},
+          {"contains": "return md5($password);", "cwe": "CWE-916"}
+        ],
+        "java/AccountService.java": [
+          {"contains": "executeQuery(\"SELECT * FROM accounts WHERE owner = '\" + owner", "cwe": "CWE-89"},
+          {"contains": "String sql = \"DELETE FROM sessions WHERE id = \" + sessionId", "cwe": "CWE-89"},
+          {"contains": "Runtime.getRuntime().exec(\"tar -xf \" + archive)", "cwe": "CWE-78"},
+          {"contains": "new ObjectInputStream(request.getInputStream())", "cwe": "CWE-502"},
+          {"contains": "DocumentBuilderFactory.newInstance().newDocumentBuilder()", "cwe": "CWE-611"},
+          {"contains": "MessageDigest.getInstance(\"SHA-1\")", "cwe": "CWE-328"},
+          {"contains": "println(\"<h1>\" + request.getParameter(\"q\")", "cwe": "CWE-79"},
+          {"contains": "new Random().nextLong()", "cwe": "CWE-338"},
+          {"contains": "sendRedirect(request.getParameter(\"next\"))", "cwe": "CWE-601"},
+          {"contains": "new File(BASE_DIR, request.getParameter(\"file\"))", "cwe": "CWE-22"}
+        ]
+      }
+    },
+    {
+      "name": "acme-shop",
+      "path": "demo/acme-shop",
+      "expected": {
+        "backend-python/app.py": [
+          {"contains": "AWS_ACCESS_KEY_ID = \"AKIA", "cwe": "CWE-798"},
+          {"contains": "DB_PASSWORD = \"Demo", "cwe": "CWE-798"},
+          {"contains": "WHERE customer_name = '{customer}'", "cwe": "CWE-89"},
+          {"contains": "open(os.path.join(INVOICES_DIR, filename)", "cwe": "CWE-22"},
+          {"contains": "\"ping -c 1 \" + host, shell=True", "cwe": "CWE-78"},
+          {"contains": "cart = pickle.loads(", "cwe": "CWE-502"},
+          {"contains": "catalog = yaml.load(", "cwe": "CWE-502"},
+          {"contains": "render_template_string(\"<h1>Bonjour \" + name", "cwe": "CWE-1336"},
+          {"contains": "hashlib.md5(password.encode())", "cwe": "CWE-916"},
+          {"contains": "verify=False", "cwe": "CWE-295"},
+          {"contains": "app.run(host=\"0.0.0.0\", debug=True)", "cwe": "CWE-489"},
+          {"contains": "FROM invoices WHERE id = ?", "cwe": "CWE-639"}
+        ],
+        "frontend-js/server.js": [
+          {"contains": "STRIPE_SECRET_KEY = \"sk_test_", "cwe": "CWE-798"},
+          {"contains": "Access-Control-Allow-Origin\", \"*\"", "cwe": "CWE-942"},
+          {"contains": "WHERE category = '${category}'", "cwe": "CWE-89"},
+          {"contains": "exec(`./scripts/export.sh ${format}`", "cwe": "CWE-78"},
+          {"contains": "res.sendFile(path.join(__dirname, \"docs\", req.query.page))", "cwe": "CWE-22"},
+          {"contains": "eval(req.body.expression)", "cwe": "CWE-95"},
+          {"contains": "const total = quantity * unitPrice;", "cwe": "CWE-602"}
+        ],
+        "frontend-js/src/reviews.ts": [
+          {"contains": "container.innerHTML = reviews", "cwe": "CWE-79"},
+          {"contains": "return Math.random().toString(36)", "cwe": "CWE-338"},
+          {"contains": "document.write(\"<h2>Bienvenue", "cwe": "CWE-79"}
+        ],
+        "legacy-php/admin.php": [
+          {"contains": "$db_password = \"Legacy", "cwe": "CWE-798"},
+          {"contains": "WHERE email = '\" . $email", "cwe": "CWE-89"},
+          {"contains": "echo \"<tr><td>\" . $row['name']", "cwe": "CWE-79"},
+          {"contains": "echo \"<p>Résultats pour : \" . $_GET['email']", "cwe": "CWE-79"},
+          {"contains": "include($module . \".php\")", "cwe": "CWE-98"},
+          {"contains": "unserialize($_COOKIE['prefs'])", "cwe": "CWE-502"},
+          {"contains": "shell_exec(\"nslookup \" . $host)", "cwe": "CWE-78"},
+          {"contains": "return md5($input) == $stored_hash;", "cwe": "CWE-916"}
+        ],
+        "billing-java/src/main/java/com/acme/billing/InvoiceService.java": [
+          {"contains": "WHERE customer_id = '\" + customerId", "cwe": "CWE-89"},
+          {"contains": "Runtime.getRuntime().exec(\"sh /opt/acme/archive.sh \" + invoiceId)", "cwe": "CWE-78"},
+          {"contains": "new ObjectInputStream(data)", "cwe": "CWE-502"},
+          {"contains": "DocumentBuilderFactory factory = DocumentBuilderFactory.newInstance()", "cwe": "CWE-611"},
+          {"contains": "new Random();", "cwe": "CWE-338"},
+          {"contains": "LOG.info(\"Accès facturation depuis : \" + userAgent)", "cwe": "CWE-117"}
+        ]
+      }
+    }
+  ]
+}
