@@ -4,6 +4,8 @@ Détecte les failles (Python, JavaScript/TypeScript, PHP, Java), les secrets com
 dépendances vulnérables, puis l'IA (Claude via OpenRouter) écarte les faux positifs, explique
 chaque faille en français et propose un correctif sous forme de diff.
 
+📊 **Suivi des tickets : [docs/AVANCEMENT.md](docs/AVANCEMENT.md)**
+
 ## Lancer la démo
 
 Prérequis : Python 3.12 + [uv](https://docs.astral.sh/uv/), Node.js 20+. Pas besoin de Docker.
