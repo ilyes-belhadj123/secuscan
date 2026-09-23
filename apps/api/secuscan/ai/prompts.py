@@ -26,7 +26,7 @@ FINDING_TEMPLATE = """Alerte à analyser
 - Ligne(s) signalée(s) : {lines}
 - Description de la règle : {message}
 
-En-tête du fichier (imports) :
+En-tête du fichier (imports et constantes de niveau module) :
 ```
 {header}
 ```

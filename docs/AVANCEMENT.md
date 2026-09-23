@@ -8,8 +8,8 @@ Légende : ✅ fait · 🟡 partiel (voir « reste à faire ») · ⬜ à faire 
 
 | | Tickets |
 |---|---|
-| ✅ Fait | 11 |
-| 🟡 Partiel | 6 |
+| ✅ Fait | 12 |
+| 🟡 Partiel | 5 |
 | ⬜ À faire | 7 |
 
 ## Qualité de détection (benchmark SS-8)
@@ -20,10 +20,14 @@ Mesure du 23/09/2026 sur 83 failles annotées (4 langages) — rapport complet :
 | Mode | Taux de détection | Taux de faux positifs | Objectif cahier des charges |
 |---|---|---|---|
 | Règles seules | **98 %** (81/83) | **5 %** (4) | > 85 % / < 15 % |
-| Règles + IA | à mesurer (clé requise) | à mesurer | |
+| Règles + IA (Claude, réel) | **100 %** (83/83) | **7 %** (6) | > 85 % / < 15 % |
 
-Les 2 failles manquées en règles seules sont des failles logiques (IDOR, prix fourni par le client)
-que seule la revue IA peut trouver ; les 4 faux positifs sont des cas que la validation IA doit écarter.
+Rapport IA : [benchmark/results/latest-ai.md](../benchmark/results/latest-ai.md). L'IA trouve les 2 failles
+logiques hors de portée des règles et écarte les faux positifs de construction de requête avec une
+constante. Sur les 6 faux positifs restants, 5 sont des failles logiques signalées par l'IA dans les
+fichiers « sûrs » et la plupart sont défendables (ex. route sans contrôle d'accès) ; le 6e est un MD5
+utilisé comme somme de contrôle (cas discutable).
+Coût mesuré : analyse complète d'Acme Shop ≈ 85 000 jetons, 85 s.
 ⚠️ Le corpus a été écrit par l'équipe qui écrit les règles : ces chiffres sont optimistes. Prochaine
 étape : ajouter des applications vulnérables open source externes (NodeGoat, DVWA, WebGoat) annotées.
 
@@ -31,8 +35,7 @@ Réalisé en plus des tickets : **revue logique par l'IA** (couche 4 du cahier d
 qu'aucune règle ne détecte, ex. IDOR), **commande de préparation de la démo**, projet de démonstration
 volontairement vulnérable « Acme Shop » (4 langages).
 
-🔒 **Point bloquant** : aucun test avec le vrai modèle Claude tant que la clé OpenRouter n'est pas
-renseignée dans `.env` (tout a été validé avec une IA simulée).
+✅ **IA réelle active** depuis le 23/09/2026 (Claude via OpenRouter) : validée sur la démo et le benchmark.
 
 ## Sprint 1 — Socle
 
@@ -56,7 +59,7 @@ renseignée dans `.env` (tout a été validé avec une IA simulée).
 
 | Ticket | Titre | Statut | Réalisé | Reste à faire |
 |---|---|---|---|---|
-| SS-9 | Validation contextuelle des alertes | 🟡 | Extraction de la fonction englobante, verdict JSON, faux positifs masqués | Mesure < 15 % de faux positifs : `benchmark --ai` avec le vrai modèle |
+| SS-9 | Validation contextuelle des alertes | ✅ | Fonction englobante + imports + constantes du module, verdict JSON, faux positifs masqués ; **7 % de faux positifs mesurés avec le vrai modèle** | — |
 | SS-10 | Explication pédagogique | 🟡 | Prompt français, scénario conceptuel, filtre de sortie anti-charge offensive | Relecture de 30 explications générées par le vrai modèle |
 | SS-11 | Proposition de correctif | 🟡 | Diff avant/après, bouton copier, vérification syntaxique (Python) | Vérification JS/PHP/Java, mesure 80 % de correctifs valides |
 | SS-12 | Maîtrise des coûts IA | 🟡 | Cache par empreinte, extraits ciblés, compteur d'appels / jetons par scan | Budget et plafonds par offre |
@@ -85,16 +88,17 @@ renseignée dans `.env` (tout a été validé avec une IA simulée).
 
 ## Prochaines étapes
 
-1. Test avec le vrai modèle (dès que la clé est dans `.env`) : `prepare_demo`, puis
-   `benchmark --ai` pour mesurer SS-9 / SS-10 / SS-11.
-2. SS-12 — plafonds de coût IA par analyse.
-3. SS-11 — vérification syntaxique des correctifs JS / PHP / Java.
+1. SS-12 — plafonds de coût IA par analyse (priorité : un gros projet comme NodeGoat, avec
+   133 dépendances vulnérables, déclencherait plus de 150 appels IA).
+2. SS-11 — vérification syntaxique des correctifs JS / PHP / Java.
+3. SS-10 — relecture de 30 explications générées par le vrai modèle.
 
 ## Historique
 
 | Date | Commit | Contenu |
 |---|---|---|
-| 23/09/2026 | (ce commit) | Correctif SCA trouvé sur un vrai projet (OWASP NodeGoat, 1 108 dépendances) : envoi par lots à OSV, lockfile v1, limites de l'analyse affichées (écran + PDF) au lieu d'échecs silencieux |
+| 23/09/2026 | (ce commit) | IA réelle validée : benchmark règles + IA (100 % / 7 %), contexte IA enrichi des constantes du module, script `configure-ia.ps1` |
+| 23/09/2026 | `26622da` | Correctif SCA trouvé sur un vrai projet (OWASP NodeGoat, 1 108 dépendances) : envoi par lots à OSV, lockfile v1, limites de l'analyse affichées (écran + PDF) au lieu d'échecs silencieux |
 | 23/09/2026 | `0e3a279` | SS-8 benchmark + règles améliorées (détection 82 % → 98 %, faux positifs 9 % → 5 %) |
 | 23/09/2026 | `f4aeb82` | Tableau de suivi des tickets |
 | 23/09/2026 | `4e31375` | Revue logique IA, import Git, marque blanche PDF, journal d'audit |

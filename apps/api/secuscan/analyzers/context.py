@@ -72,7 +72,14 @@ def enclosing_excerpt(lines: list[str], language: str, start: int, end: int) -> 
     return Excerpt(top, bottom, "\n".join(lines[top - 1 : bottom]))
 
 
-def file_header(lines: list[str], limit: int = 30) -> str:
-    """Imports / déclarations en tête de fichier, utiles à l'IA pour le contexte."""
-    header = [line for line in lines[:120] if _IMPORT.match(line)]
-    return "\n".join(header[:limit])
+# Constantes de niveau module : l'IA doit voir qu'une valeur concaténée est fixe (ex. TABLE = "users")
+_CONSTANT = re.compile(
+    r"^([A-Z][A-Z0-9_]*\s*=|(export\s+)?const\s+[A-Z][A-Z0-9_]*\s*=|define\(|const\s+[A-Z][A-Z0-9_]*\s*=|"
+    r"\s*(private|public|protected)?\s*static\s+final\s)"
+)
+
+
+def file_header(lines: list[str], limit: int = 40) -> str:
+    """Imports et constantes de niveau module, utiles à l'IA pour juger d'où viennent les valeurs."""
+    header = [line for line in lines[:200] if _IMPORT.match(line) or _CONSTANT.match(line)]
+    return "\n".join(line[:200] for line in header[:limit])
