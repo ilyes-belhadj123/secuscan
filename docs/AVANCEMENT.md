@@ -8,8 +8,8 @@ Légende : ✅ fait · 🟡 partiel (voir « reste à faire ») · ⬜ à faire 
 
 | | Tickets |
 |---|---|
-| ✅ Fait | 14 |
-| 🟡 Partiel | 3 |
+| ✅ Fait | 15 |
+| 🟡 Partiel | 2 |
 | ⬜ À faire | 7 |
 
 ## Qualité de détection (benchmark SS-8)
@@ -61,7 +61,7 @@ volontairement vulnérable « Acme Shop » (4 langages).
 | Ticket | Titre | Statut | Réalisé | Reste à faire |
 |---|---|---|---|---|
 | SS-9 | Validation contextuelle des alertes | ✅ | Fonction englobante + imports + constantes du module, verdict JSON, faux positifs masqués ; **7 % de faux positifs mesurés avec le vrai modèle** | — |
-| SS-10 | Explication pédagogique | 🟡 | Prompt français, scénario conceptuel, filtre de sortie anti-charge offensive | Relecture de 30 explications générées par le vrai modèle |
+| SS-10 | Explication pédagogique | ✅ | Prompt français, scénario conceptuel, filtre de sortie anti-charge offensive ; [relecture de 30 explications réelles](qa/relecture-SS-10.md) : 26/30 sans remarque, 4 défauts corrigés (prompt v2) | Contre-relecture par un expert sécurité humain avant la bêta |
 | SS-11 | Proposition de correctif | ✅ | Diff avant/après, bouton copier, vérification syntaxique dans les 4 langages (tree-sitter + ast), correctif replacé dans le fichier complet ; **89/89 correctifs valides (100 %)** sur le benchmark | Relance automatique de l'IA si un correctif est invalide |
 | SS-12 | Maîtrise des coûts IA | ✅ | Budget par analyse et par offre (Free 40 / Pro 150 / Business 500 appels), priorisation par gravité, revue logique limitée aux fichiers exposés, dépendances peu graves expliquées sans IA (base OSV), cache par empreinte, coût estimé par analyse + page « Coûts IA ». Mesuré : NodeGoat (3 087 lignes) **0,97 $** | Regrouper plusieurs alertes d'un même fichier par appel |
 | SS-13 | Classification et sévérité | ✅ | Mapping CWE → OWASP Top 10 2025, 4 niveaux, règles de scoring documentées | — |
@@ -89,15 +89,16 @@ volontairement vulnérable « Acme Shop » (4 langages).
 
 ## Prochaines étapes
 
-1. SS-10 — relecture de 30 explications générées par le vrai modèle.
-2. SS-2 — comptes et organisations (prérequis de l'hébergement en ligne et des offres SS-20).
-3. SS-5 — brancher un moteur SAST open source en complément des règles maison.
+1. SS-2 — comptes et organisations (prérequis de l'hébergement en ligne et des offres SS-20).
+2. SS-5 — brancher un moteur SAST open source en complément des règles maison.
+3. SS-17 — OAuth GitHub / GitLab pour les dépôts privés.
 
 ## Historique
 
 | Date | Commit | Contenu |
 |---|---|---|
-| 23/09/2026 | (ce commit) | SS-11 vérification syntaxique des correctifs dans les 4 langages (89/89 valides) |
+| 23/09/2026 | (ce commit) | SS-10 relecture de 30 explications IA, prompt v2 (environnement d'exécution, rien d'inventé, CWE précis), extraits sans accolade du bloc parent |
+| 23/09/2026 | `746bdce` | SS-11 vérification syntaxique des correctifs dans les 4 langages (89/89 valides) |
 | 23/09/2026 | `783b6ed` | SS-12 coûts IA : budget par offre, priorisation, dépendances sans IA, page « Coûts IA » ; robustesse aux réponses vides / tronquées. Vrai projet NodeGoat avec IA : 25 failles logiques trouvées pour 0,97 $ |
 | 23/09/2026 | `5842133` | IA réelle validée : benchmark règles + IA (100 % / 7 %), contexte IA enrichi des constantes du module, script `configure-ia.ps1` |
 | 23/09/2026 | `26622da` | Correctif SCA trouvé sur un vrai projet (OWASP NodeGoat, 1 108 dépendances) : envoi par lots à OSV, lockfile v1, limites de l'analyse affichées (écran + PDF) au lieu d'échecs silencieux |

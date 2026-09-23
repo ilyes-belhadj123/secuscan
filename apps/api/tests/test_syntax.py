@@ -57,5 +57,14 @@ def test_splice_replaces_exact_lines():
     assert splice("a\nb\nc\nd", 2, 3, "X") == "a\nX\nd"
 
 
+def test_excerpt_excludes_parent_closing_brace():
+    from secuscan.analyzers.context import enclosing_excerpt
+
+    lines = JAVA_FILE.split("\n")
+    excerpt = enclosing_excerpt(lines, "java", 5, 5)
+    assert excerpt.code.rstrip().endswith("    }")  # fin de la méthode, sans le « } » de la classe
+    assert excerpt.end_line == 6
+
+
 def test_unknown_language():
     assert count_errors("cobol", "IDENTIFICATION DIVISION.") is None

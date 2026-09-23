@@ -46,6 +46,7 @@ def main() -> int:
     print(f"  Failles logiques (IA)   : {kinds.get('ai', 0)}")
     print(f"  Appels IA / cache / err : {s.ai_calls} / {s.ai_cache_hits} / {s.ai_errors}")
     print(f"  Jetons consommés        : {s.ai_tokens}")
+    print(f"  Coût estimé             : {s.ai_cost_usd:.2f} $")
 
     enriched = sum(1 for f in findings if f.ai)
     ready = s.ai_errors == 0 and enriched > 0

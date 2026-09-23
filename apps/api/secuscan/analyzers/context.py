@@ -15,6 +15,13 @@ _FUNC_START["typescript"] = _FUNC_START["javascript"]
 
 _IMPORT = re.compile(r"^\s*(import\b|from\s+\S+\s+import\b|const\s+.*=\s*require\(|use\s+[\w\\]+;|package\b)")
 
+_CLOSING_ONLY = re.compile(r"^\s*[}\])]+[;,)]*\s*$")
+
+
+def _indent(line: str) -> int:
+    return len(line) - len(line.lstrip())
+
+
 MAX_BEFORE = 40
 MAX_AFTER = 30
 MAX_LINES = 150
@@ -62,8 +69,13 @@ def enclosing_excerpt(lines: list[str], language: str, start: int, end: int) -> 
             bottom = i - 1
             break
         bottom = i
-    # Retirer les lignes vides en fin d'extrait
-    while bottom > end and not lines[bottom - 1].strip():
+    # Retirer les lignes vides et les fermetures des blocs parents (ex. « } » de la classe qui
+    # suit la dernière méthode) : moins indentées que le début de l'extrait, elles n'en font pas partie
+    base_indent = _indent(lines[top - 1])
+    while bottom > end and (
+        not lines[bottom - 1].strip()
+        or (_CLOSING_ONLY.match(lines[bottom - 1]) and _indent(lines[bottom - 1]) < base_indent)
+    ):
         bottom -= 1
 
     if bottom - top + 1 > MAX_LINES:
