@@ -316,7 +316,8 @@ class ScanService:
         def work(f: Finding):
             if f.kind == "dependency":
                 return enricher.review_dependency(f)
-            return enricher.review_code_finding(f, headers.get(f.file, ""))
+            source = redacted.get(f.file)
+            return enricher.review_code_finding(f, headers.get(f.file, ""), source.content if source else None)
 
         errors = refused = 0
         with ThreadPoolExecutor(max_workers=max(1, self.settings.secuscan_ai_concurrency)) as pool:

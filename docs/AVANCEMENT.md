@@ -8,8 +8,8 @@ Légende : ✅ fait · 🟡 partiel (voir « reste à faire ») · ⬜ à faire 
 
 | | Tickets |
 |---|---|
-| ✅ Fait | 13 |
-| 🟡 Partiel | 4 |
+| ✅ Fait | 14 |
+| 🟡 Partiel | 3 |
 | ⬜ À faire | 7 |
 
 ## Qualité de détection (benchmark SS-8)
@@ -21,6 +21,7 @@ Mesure du 23/09/2026 sur 83 failles annotées (4 langages) — rapport complet :
 |---|---|---|---|
 | Règles seules | **98 %** (81/83) | **5 %** (4) | > 85 % / < 15 % |
 | Règles + IA (Claude, réel) | **100 %** (83/83) | **7 %** (6) | > 85 % / < 15 % |
+| Correctifs syntaxiquement valides | **100 %** (89/89) | | > 80 % |
 
 Rapport IA : [benchmark/results/latest-ai.md](../benchmark/results/latest-ai.md). L'IA trouve les 2 failles
 logiques hors de portée des règles et écarte les faux positifs de construction de requête avec une
@@ -61,7 +62,7 @@ volontairement vulnérable « Acme Shop » (4 langages).
 |---|---|---|---|---|
 | SS-9 | Validation contextuelle des alertes | ✅ | Fonction englobante + imports + constantes du module, verdict JSON, faux positifs masqués ; **7 % de faux positifs mesurés avec le vrai modèle** | — |
 | SS-10 | Explication pédagogique | 🟡 | Prompt français, scénario conceptuel, filtre de sortie anti-charge offensive | Relecture de 30 explications générées par le vrai modèle |
-| SS-11 | Proposition de correctif | 🟡 | Diff avant/après, bouton copier, vérification syntaxique (Python) | Vérification JS/PHP/Java, mesure 80 % de correctifs valides |
+| SS-11 | Proposition de correctif | ✅ | Diff avant/après, bouton copier, vérification syntaxique dans les 4 langages (tree-sitter + ast), correctif replacé dans le fichier complet ; **89/89 correctifs valides (100 %)** sur le benchmark | Relance automatique de l'IA si un correctif est invalide |
 | SS-12 | Maîtrise des coûts IA | ✅ | Budget par analyse et par offre (Free 40 / Pro 150 / Business 500 appels), priorisation par gravité, revue logique limitée aux fichiers exposés, dépendances peu graves expliquées sans IA (base OSV), cache par empreinte, coût estimé par analyse + page « Coûts IA ». Mesuré : NodeGoat (3 087 lignes) **0,97 $** | Regrouper plusieurs alertes d'un même fichier par appel |
 | SS-13 | Classification et sévérité | ✅ | Mapping CWE → OWASP Top 10 2025, 4 niveaux, règles de scoring documentées | — |
 
@@ -88,15 +89,16 @@ volontairement vulnérable « Acme Shop » (4 langages).
 
 ## Prochaines étapes
 
-1. SS-11 — vérification syntaxique des correctifs JS / PHP / Java.
-2. SS-10 — relecture de 30 explications générées par le vrai modèle.
-3. SS-2 — comptes et organisations (prérequis de l'hébergement en ligne et des offres SS-20).
+1. SS-10 — relecture de 30 explications générées par le vrai modèle.
+2. SS-2 — comptes et organisations (prérequis de l'hébergement en ligne et des offres SS-20).
+3. SS-5 — brancher un moteur SAST open source en complément des règles maison.
 
 ## Historique
 
 | Date | Commit | Contenu |
 |---|---|---|
-| 23/09/2026 | (ce commit) | SS-12 coûts IA : budget par offre, priorisation, dépendances sans IA, page « Coûts IA » ; robustesse aux réponses vides / tronquées. Vrai projet NodeGoat avec IA : 25 failles logiques trouvées pour 0,97 $ |
+| 23/09/2026 | (ce commit) | SS-11 vérification syntaxique des correctifs dans les 4 langages (89/89 valides) |
+| 23/09/2026 | `783b6ed` | SS-12 coûts IA : budget par offre, priorisation, dépendances sans IA, page « Coûts IA » ; robustesse aux réponses vides / tronquées. Vrai projet NodeGoat avec IA : 25 failles logiques trouvées pour 0,97 $ |
 | 23/09/2026 | `5842133` | IA réelle validée : benchmark règles + IA (100 % / 7 %), contexte IA enrichi des constantes du module, script `configure-ia.ps1` |
 | 23/09/2026 | `26622da` | Correctif SCA trouvé sur un vrai projet (OWASP NodeGoat, 1 108 dépendances) : envoi par lots à OSV, lockfile v1, limites de l'analyse affichées (écran + PDF) au lieu d'échecs silencieux |
 | 23/09/2026 | `0e3a279` | SS-8 benchmark + règles améliorées (détection 82 % → 98 %, faux positifs 9 % → 5 %) |

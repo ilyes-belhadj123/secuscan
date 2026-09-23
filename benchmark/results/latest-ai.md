@@ -1,6 +1,6 @@
 # Benchmark SecuScan — règles + IA
 
-Exécuté le 23/09/2026 10:44 UTC · 83 failles attendues · tolérance ±2 lignes
+Exécuté le 23/09/2026 11:19 UTC · 83 failles attendues · tolérance ±2 lignes
 
 | Langage | Détectées | Manquées | Faux positifs | Taux de détection | Taux de faux positifs |
 |---|---|---|---|---|---|
@@ -12,6 +12,11 @@ Exécuté le 23/09/2026 10:44 UTC · 83 failles attendues · tolérance ±2 lign
 | **Total** | **83** | **0** | **6** | **100 %** | **7 %** |
 
 Alertes écartées par la validation IA : 3 · doublons : 0
+
+## Correctifs proposés (SS-11)
+
+89 correctifs · syntaxe valide : **89/89** (100 %) · non vérifiables : 0
+
 
 ## Failles manquées
 

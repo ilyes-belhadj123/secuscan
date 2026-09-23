@@ -64,6 +64,9 @@ class Result:
     false_positives: list[Finding] = field(default_factory=list)
     duplicates: int = 0
     rejected_by_ai: int = 0
+    # SS-11 : validité syntaxique des correctifs proposés (True / False / None = non vérifiable)
+    fix_checks: list[bool | None] = field(default_factory=list)
+    invalid_fixes: list[Finding] = field(default_factory=list)
 
     def stats(self, language: str | None = None) -> dict:
         exp = [e for e in self.expected if language is None or e.language == language]
@@ -98,6 +101,11 @@ def load_expected(path: Path) -> list[tuple[Path, list[Expected]]]:
 def match(expected: list[Expected], findings: list[Finding], result: Result) -> None:
     code_findings = [f for f in findings if f.kind != "dependency"]
     result.rejected_by_ai += sum(1 for f in code_findings if f.status == "false_positive")
+    for f in code_findings:
+        if f.status == "open" and f.ai and f.ai.fix:
+            result.fix_checks.append(f.ai.fix.syntax_valid)
+            if f.ai.fix.syntax_valid is False:
+                result.invalid_fixes.append(f)
     for f in (f for f in code_findings if f.status == "open"):
         candidates = [
             e for e in expected
@@ -158,6 +166,18 @@ def to_markdown(result: Result) -> str:
     out.append(f"| **Total** | **{total['tp']}** | **{total['fn']}** | **{total['fp']}** | "
                f"**{_pct(total['recall'])}** | **{_pct(total['fp_rate'])}** |")
     out += ["", f"Alertes écartées par la validation IA : {result.rejected_by_ai} · doublons : {result.duplicates}", ""]
+    if result.fix_checks:
+        valid = sum(1 for c in result.fix_checks if c is True)
+        invalid = sum(1 for c in result.fix_checks if c is False)
+        checked = valid + invalid
+        out += [
+            "## Correctifs proposés (SS-11)", "",
+            f"{len(result.fix_checks)} correctifs · syntaxe valide : **{valid}/{checked}** "
+            f"({_pct(valid / checked if checked else None)}) · non vérifiables : {len(result.fix_checks) - checked}",
+            "",
+        ]
+        out += [f"- Syntaxe invalide : `{f.file}:{f.start_line}` {f.rule_id}" for f in result.invalid_fixes]
+        out.append("")
     out += ["## Failles manquées", ""]
     missed = [e for e in result.expected if not e.matched_by]
     out += [f"- `{e.source}/{e.file}:{e.line}` {e.cwe} — `{e.anchor}`" for e in missed] or ["Aucune."]

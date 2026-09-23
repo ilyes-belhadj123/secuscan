@@ -4,19 +4,18 @@ Mode « live + cache » : chaque réponse est mise en cache par empreinte (modè
 contenu envoyé). Si l'API est indisponible, on se rabat sur le cache ; à défaut, l'alerte reste
 affichée avec l'explication statique de la règle.
 """
-import ast
 import difflib
 import hashlib
 import json
 import logging
 import re
-import textwrap
 import threading
 import time
 from dataclasses import dataclass
 
 import httpx
 
+from ..analyzers.syntax import patch_is_valid
 from ..config import Settings
 from ..ingest import SourceFile
 from ..models import AIReview, Explanation, Finding, FixSuggestion, Severity
@@ -115,16 +114,6 @@ def _extract_json(text: str) -> dict:
     return json.loads(text[start : end + 1])
 
 
-def _syntax_ok(language: str, code: str) -> bool | None:
-    if language != "python":
-        return None
-    try:
-        ast.parse(textwrap.dedent(code))
-        return True
-    except SyntaxError:
-        return False
-
-
 def unified_diff(original: str, patched: str, file: str, start_line: int) -> str:
     diff = difflib.unified_diff(
         original.split("\n"), patched.split("\n"),
@@ -209,7 +198,7 @@ class Enricher:
         raise AIUnavailable(f"IA indisponible : {last_error}")
 
     # ------------------------------------------------------------------ findings code
-    def review_code_finding(self, finding: Finding, header: str) -> AIReview:
+    def review_code_finding(self, finding: Finding, header: str, file_content: str | None = None) -> AIReview:
         lines = f"{finding.start_line}" if finding.start_line == finding.end_line else (
             f"{finding.start_line}-{finding.end_line}")
         end = finding.snippet_start_line + finding.snippet.count("\n")
@@ -247,7 +236,10 @@ class Enricher:
                 diff=unified_diff(finding.snippet, patched, finding.file, finding.snippet_start_line),
                 explanation=clean(data.get("fix_explanation")),
                 best_practices=[clean(p) for p in (data.get("best_practices") or [])][:5],
-                syntax_valid=_syntax_ok(finding.language, patched),
+                syntax_valid=patch_is_valid(
+                    finding.language, patched, original=finding.snippet, file_content=file_content,
+                    start_line=finding.snippet_start_line, filename=finding.file,
+                ),
             )
         explanation = Explanation(
             definition=clean(data.get("definition")),
