@@ -15,7 +15,7 @@ copy .env.example .env      # puis renseigner OPENROUTER_API_KEY dans .env
 powershell -ExecutionPolicy Bypass -File start-demo.ps1
 ```
 
-L'interface s'ouvre sur http://127.0.0.1:5173 (API sur le port 8000).
+L'interface s'ouvre sur http://127.0.0.1:5173 (API sur le port 8001).
 
 **Premier lancement** : créez votre compte et votre organisation (« Créer une organisation »). La
 première organisation créée récupère les analyses faites avant l'arrivée des comptes. Invitez
@@ -25,7 +25,7 @@ Rôles : propriétaire, administrateur (invitations, journal d'audit), membre (a
 Lancement manuel :
 
 ```powershell
-cd apps/api; uv sync; uv run python -m uvicorn secuscan.main:app --port 8000
+cd apps/api; uv sync; uv run python -m uvicorn secuscan.main:app --port 8001
 cd apps/web; npm install; npm run dev
 ```
 
