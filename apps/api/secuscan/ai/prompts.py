@@ -58,6 +58,48 @@ Réponds avec exactement cet objet JSON :
   "best_practices": ["2 à 4 bonnes pratiques courtes"]
 }}"""
 
+FINDINGS_BATCH_TEMPLATE = """Alertes à analyser : {count} alertes du même fichier
+- Langage : {language}
+- Fichier : {file}
+
+En-tête du fichier (imports et constantes de niveau module) :
+```
+{header}
+```
+
+{alerts}
+
+Analyse chaque alerte indépendamment, avec les mêmes exigences que pour une alerte seule.
+Réponds avec exactement cet objet JSON, une entrée par alerte, dans le même ordre :
+{{
+  "reviews": [
+    {{
+      "id": "identifiant de l'alerte (A1, A2…)",
+      "verdict": "true_positive" | "false_positive" | "uncertain",
+      "confidence": nombre entre 0 et 1,
+      "reason": "1 à 2 phrases justifiant le verdict",
+      "definition": "ce qu'est cette faille, en 2 à 3 phrases",
+      "attack_scenario": "comment un attaquant pourrait l'exploiter ici, conceptuellement, en 2 à 4 phrases",
+      "business_impact": "conséquences concrètes pour l'entreprise (données, argent, image, RGPD)",
+      "difficulty": "facile" | "moyenne" | "difficile",
+      "patched_code": "l'extrait complet de cette alerte réécrit avec le correctif, sans numéros de ligne",
+      "fix_explanation": "ce que change le correctif et pourquoi il protège",
+      "best_practices": ["2 à 4 bonnes pratiques courtes"]
+    }}
+  ]
+}}"""
+
+BATCH_ALERT_TEMPLATE = """### Alerte {id}
+- Règle : {rule_id} — {title}
+- CWE : {cwe}
+- Ligne(s) signalée(s) : {lines}
+- Description de la règle : {message}
+
+Extrait concerné (lignes {start}-{end}, numérotées pour référence) :
+```
+{numbered}
+```"""
+
 LOGIC_TEMPLATE = """Revue de logique de sécurité d'un fichier complet
 - Fichier : {file}
 - Langage : {language}

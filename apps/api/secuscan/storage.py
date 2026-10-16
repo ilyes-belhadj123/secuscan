@@ -425,6 +425,12 @@ class Storage:
             ).fetchall()
         return [dict(zip(keys, r, strict=True)) for r in rows]
 
+    def installation_org_id(self) -> str | None:
+        """Première organisation créée : celle du propriétaire de l'installation."""
+        with self._conn() as conn:
+            row = conn.execute("SELECT id FROM organizations ORDER BY created_at, rowid LIMIT 1").fetchone()
+        return row[0] if row else None
+
     def count_orgs(self) -> int:
         with self._conn() as conn:
             return conn.execute("SELECT COUNT(*) FROM organizations").fetchone()[0]

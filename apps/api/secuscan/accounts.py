@@ -16,7 +16,15 @@ from .auth import (
     verify_or_dummy,
 )
 from .billing import check_member_quota
-from .deps import ROLE_LABELS, SESSION_COOKIE, Context, current_context, get_service, require_admin
+from .deps import (
+    ROLE_LABELS,
+    SESSION_COOKIE,
+    Context,
+    current_context,
+    get_service,
+    is_installation_admin,
+    require_admin,
+)
 from .mailer import send_email
 from .pipeline import ScanService
 from .plans import QuotaExceeded, get_plan
@@ -88,6 +96,7 @@ def _me(service: ScanService, ctx: Context) -> dict:
                 "plan": plan.id, "plan_name": plan.name, "features": sorted(plan.features)},
         "organizations": service.storage.memberships_of(ctx.user_id),
         "is_operator": ctx.email.lower() in {e.strip().lower() for e in service.settings.secuscan_operator_emails},
+        "can_manage_settings": is_installation_admin(service, ctx),
     }
 
 

@@ -12,6 +12,7 @@ from fastapi import Depends, FastAPI, File, Form, HTTPException, Query, Request,
 from fastapi.responses import JSONResponse, Response
 
 from .accounts import router as accounts_router
+from .ai_settings import router as ai_settings_router
 from .beta import router as beta_router
 from .billing import check_scan_quota
 from .billing import router as billing_router
@@ -39,6 +40,7 @@ app.include_router(accounts_router)
 app.include_router(billing_router)
 app.include_router(git_router)
 app.include_router(beta_router)
+app.include_router(ai_settings_router)
 
 _UNSAFE_METHODS = {"POST", "PUT", "PATCH", "DELETE"}
 

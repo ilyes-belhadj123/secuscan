@@ -8,7 +8,7 @@ from collections.abc import Callable
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from pathlib import Path
 
-from .ai.enricher import AIBudget, AIUnavailable, BudgetExceeded, Enricher
+from .ai.enricher import BATCH_SIZE, AIBudget, AIUnavailable, BudgetExceeded, Enricher
 from .analyzers import external, sast, sca, secrets
 from .analyzers.context import enclosing_excerpt, file_header
 from .analyzers.rules import RULES_BY_ID
@@ -362,29 +362,51 @@ class ScanService:
         headers = {path: file_header(src.content.split("\n")) for path, src in redacted.items()}
         self._progress(scan, f"Enrichissement IA (0/{len(todo)})", 0.5)
 
-        def work(f: Finding):
+        # Alertes de code regroupées par fichier et par gravité (un appel pour plusieurs alertes), dans
+        # l'ordre de priorité : le budget, s'il s'épuise, ne prive d'IA que les alertes les moins graves
+        units: list[list[Finding]] = []
+        open_units: dict[tuple, list[Finding]] = {}
+        for f in todo:
             if f.kind == "dependency":
-                return enricher.review_dependency(f)
-            source = redacted.get(f.file)
-            return enricher.review_code_finding(f, headers.get(f.file, ""), source.content if source else None)
+                units.append([f])
+                continue
+            key = (f.file, f.severity)
+            unit = open_units.get(key)
+            if unit is None or len(unit) >= BATCH_SIZE:
+                unit = open_units[key] = []
+                units.append(unit)
+            unit.append(f)
 
-        errors = refused = 0
+        def work(unit: list[Finding]) -> dict:
+            first = unit[0]
+            if first.kind == "dependency":
+                return {first.id: enricher.review_dependency(first)}
+            source = redacted.get(first.file)
+            return enricher.review_code_findings(unit, headers.get(first.file, ""), source.content if source else None)
+
+        errors = refused = done = 0
         with ThreadPoolExecutor(max_workers=max(1, self.settings.secuscan_ai_concurrency)) as pool:
-            futures = {pool.submit(work, f): f for f in todo}
-            for done, future in enumerate(as_completed(futures), start=1):
-                f = futures[future]
+            futures = {pool.submit(work, unit): unit for unit in units}
+            for future in as_completed(futures):
+                unit = futures[future]
                 try:
-                    f.ai = future.result()
-                except BudgetExceeded as exc:
-                    f.ai_error = str(exc)
-                    refused += 1
-                except AIUnavailable as exc:
-                    f.ai_error = str(exc)
-                    errors += 1
+                    results = future.result()
                 except Exception as exc:  # noqa: BLE001 — une alerte ne doit pas faire échouer le scan
-                    log.exception("Enrichissement IA de %s échoué", f.id)
-                    f.ai_error = f"Erreur IA : {exc}"
-                    errors += 1
+                    if not isinstance(exc, AIUnavailable):
+                        log.exception("Enrichissement IA de %s échoué", unit[0].file)
+                        exc = AIUnavailable(f"Erreur IA : {exc}")
+                    results = {f.id: exc for f in unit}
+                for f in unit:
+                    result = results[f.id]
+                    if isinstance(result, AIUnavailable):
+                        f.ai_error = str(result)
+                        if isinstance(result, BudgetExceeded):
+                            refused += 1
+                        else:
+                            errors += 1
+                    else:
+                        f.ai = result
+                done += len(unit)
                 self._progress(scan, f"Enrichissement IA ({done}/{len(todo)})", 0.5 + 0.45 * done / len(todo))
 
         s = scan.summary

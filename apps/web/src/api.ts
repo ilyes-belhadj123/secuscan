@@ -182,6 +182,26 @@ export interface Me {
   org: { id: string; name: string; role: Role; role_label: string; plan: PlanId; plan_name: string; features: string[] };
   organizations: { org_id: string; name: string; role: Role }[];
   is_operator: boolean;
+  can_manage_settings: boolean;
+}
+
+export interface AISettings {
+  model: string;
+  key_configured: boolean;
+  key_hint: string;
+  ai_enabled: boolean;
+  ai_disabled: boolean;
+  price_input_per_mtok: number;
+  price_output_per_mtok: number;
+}
+
+export interface AIModel {
+  id: string;
+  name: string;
+  provider: string;
+  price_input_per_mtok: number;
+  price_output_per_mtok: number;
+  context_length: number | null;
 }
 
 export type FixVerdict = "applied" | "helpful" | "not_helpful";
@@ -358,6 +378,10 @@ export const api = {
   operator: () => request<OperatorDashboard>("/api/operator/beta"),
   selectPlan: (plan: PlanId) => request<{ invoice: Invoice | null }>("/api/billing/plan", send("POST", { plan })),
   costs: () => request<Costs>("/api/costs"),
+  aiSettings: () => request<AISettings>("/api/settings/ai"),
+  aiModels: () => request<AIModel[]>("/api/settings/ai/models"),
+  saveAISettings: (model: string, api_key: string) =>
+    request<AISettings>("/api/settings/ai", send("PUT", { model, api_key })),
   reportUrl: (id: string, format: "pdf" | "json", options?: { preparedFor?: string; preparedBy?: string }) => {
     const params = new URLSearchParams();
     if (options?.preparedFor?.trim()) params.set("prepared_for", options.preparedFor.trim());

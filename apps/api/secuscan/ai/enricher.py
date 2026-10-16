@@ -21,7 +21,15 @@ from ..ingest import SourceFile
 from ..models import AIReview, Explanation, Finding, FixSuggestion, Severity
 from ..storage import Storage
 from ..taxonomy import references_for
-from .prompts import DEPENDENCY_TEMPLATE, FINDING_TEMPLATE, LOGIC_TEMPLATE, PROMPT_VERSION, SYSTEM_PROMPT
+from .prompts import (
+    BATCH_ALERT_TEMPLATE,
+    DEPENDENCY_TEMPLATE,
+    FINDING_TEMPLATE,
+    FINDINGS_BATCH_TEMPLATE,
+    LOGIC_TEMPLATE,
+    PROMPT_VERSION,
+    SYSTEM_PROMPT,
+)
 from .safety import sanitize
 
 log = logging.getLogger(__name__)
@@ -66,6 +74,9 @@ class AIBudget:
 LOGIC_MIN_CONFIDENCE = 0.7
 MAX_OUTPUT_TOKENS = 4096
 MAX_OUTPUT_TOKENS_RETRY = 8192
+# Alertes d'un même fichier relues en un seul appel (SS-12) : moins d'appels, analyse plus rapide
+BATCH_SIZE = 4
+BATCH_OUTPUT_TOKENS_PER_ALERT = 2048
 
 
 @dataclass
@@ -105,6 +116,31 @@ class AIStats:
                 + self.completion_tokens * settings.secuscan_ai_price_output_per_mtok) / 1_000_000
 
 
+def check_connection(settings: Settings) -> None:
+    """Vérifie la clé et le modèle par un appel minimal, jamais servi depuis le cache."""
+    payload = {"model": settings.openrouter_model, "messages": [{"role": "user", "content": "Réponds : ok"}],
+               "max_tokens": 5}
+    headers = {"Authorization": f"Bearer {settings.openrouter_api_key}", "X-Title": "SecuScan"}
+    try:
+        with httpx.Client(timeout=30) as client:
+            resp = client.post(settings.openrouter_url, json=payload, headers=headers)
+    except httpx.HTTPError as exc:
+        raise AIUnavailable(f"OpenRouter injoignable : {exc}") from exc
+    if resp.is_success:
+        return
+    try:
+        detail = str(resp.json()["error"]["message"])[:200]
+    except (ValueError, KeyError, TypeError):
+        detail = f"code {resp.status_code}"
+    if resp.status_code == 401:
+        raise AIUnavailable("Clé OpenRouter refusée.")
+    if resp.status_code == 402:
+        raise AIUnavailable("Crédit OpenRouter insuffisant.")
+    if resp.status_code in (400, 404):
+        raise AIUnavailable(f"Modèle refusé par OpenRouter : {detail}")
+    raise AIUnavailable(f"OpenRouter a répondu une erreur : {detail}")
+
+
 def _extract_json(text: str) -> dict:
     text = text.strip()
     text = re.sub(r"^```(json)?\s*|\s*```$", "", text)
@@ -138,7 +174,7 @@ class Enricher:
         self.budget = budget or AIBudget(*settings.ai_budget)
 
     # ------------------------------------------------------------------ transport
-    def _complete(self, prompt: str) -> dict:
+    def _complete(self, prompt: str, max_tokens: int = MAX_OUTPUT_TOKENS) -> dict:
         key = hashlib.sha256(
             f"{self.settings.openrouter_model}|{PROMPT_VERSION}|{SYSTEM_PROMPT}|{prompt}".encode()
         ).hexdigest()
@@ -158,7 +194,7 @@ class Enricher:
                 {"role": "user", "content": prompt},
             ],
             "temperature": 0.1,
-            "max_tokens": MAX_OUTPUT_TOKENS,
+            "max_tokens": max_tokens,
             "response_format": {"type": "json_object"},
         }
         headers = {
@@ -183,7 +219,7 @@ class Enricher:
                 choice = body["choices"][0]
                 if choice.get("finish_reason") == "length":
                     # Réponse tronquée : on retente une fois avec une limite de sortie plus large
-                    payload["max_tokens"] = MAX_OUTPUT_TOKENS_RETRY
+                    payload["max_tokens"] = max(MAX_OUTPUT_TOKENS_RETRY, 2 * max_tokens)
                     raise ValueError("réponse tronquée (limite de jetons de sortie atteinte)")
                 content = (choice.get("message") or {}).get("content")
                 if not content:
@@ -198,19 +234,56 @@ class Enricher:
         raise AIUnavailable(f"IA indisponible : {last_error}")
 
     # ------------------------------------------------------------------ findings code
-    def review_code_finding(self, finding: Finding, header: str, file_content: str | None = None) -> AIReview:
+    @staticmethod
+    def _alert_fields(finding: Finding) -> dict:
         lines = f"{finding.start_line}" if finding.start_line == finding.end_line else (
             f"{finding.start_line}-{finding.end_line}")
-        end = finding.snippet_start_line + finding.snippet.count("\n")
         numbered = "\n".join(
             f"{finding.snippet_start_line + i:>4} | {line}" for i, line in enumerate(finding.snippet.split("\n"))
         )
+        return {
+            "rule_id": finding.rule_id, "title": finding.title, "cwe": finding.cwe or "n/a", "lines": lines,
+            "message": finding.message, "start": finding.snippet_start_line,
+            "end": finding.snippet_start_line + finding.snippet.count("\n"), "numbered": numbered,
+        }
+
+    def review_code_finding(self, finding: Finding, header: str, file_content: str | None = None) -> AIReview:
         prompt = FINDING_TEMPLATE.format(
-            rule_id=finding.rule_id, title=finding.title, cwe=finding.cwe or "n/a",
-            language=finding.language, file=finding.file, lines=lines, message=finding.message,
-            header=header or "(aucun)", start=finding.snippet_start_line, end=end, numbered=numbered,
+            language=finding.language, file=finding.file, header=header or "(aucun)", **self._alert_fields(finding),
         )
-        data = self._complete(prompt)
+        return self._code_review(finding, self._complete(prompt), file_content)
+
+    def review_code_findings(self, findings: list[Finding], header: str,
+                             file_content: str | None = None) -> dict[str, AIReview | AIUnavailable]:
+        """Alertes d'un même fichier en un seul appel ; une alerte absente de la réponse est relue seule."""
+        if len(findings) == 1:
+            return {findings[0].id: self.review_code_finding(findings[0], header, file_content)}
+        first = findings[0]
+        alerts = "\n\n".join(
+            BATCH_ALERT_TEMPLATE.format(id=f"A{i}", **self._alert_fields(f)) for i, f in enumerate(findings, start=1)
+        )
+        prompt = FINDINGS_BATCH_TEMPLATE.format(
+            count=len(findings), language=first.language, file=first.file, header=header or "(aucun)", alerts=alerts,
+        )
+        data = self._complete(prompt, max_tokens=BATCH_OUTPUT_TOKENS_PER_ALERT * len(findings))
+        items = [item for item in (data.get("reviews") or []) if isinstance(item, dict)]
+        by_id = {str(item.get("id", "")).strip(): item for item in items}
+        results: dict[str, AIReview | AIUnavailable] = {}
+        for i, finding in enumerate(findings, start=1):
+            item = by_id.get(f"A{i}")
+            if item is None and len(items) == len(findings) and not any(k.startswith("A") for k in by_id):
+                item = items[i - 1]  # réponse sans identifiants : correspondance par position
+            try:
+                if item is None:
+                    results[finding.id] = self.review_code_finding(finding, header, file_content)
+                else:
+                    results[finding.id] = self._code_review(finding, {**item, "_cached": data.get("_cached")},
+                                                            file_content)
+            except AIUnavailable as exc:
+                results[finding.id] = exc
+        return results
+
+    def _code_review(self, finding: Finding, data: dict, file_content: str | None) -> AIReview:
         filtered = False
 
         def clean(value) -> str:

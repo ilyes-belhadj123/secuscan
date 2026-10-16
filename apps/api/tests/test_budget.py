@@ -32,11 +32,15 @@ def test_cost_estimate():
     assert stats.cost_usd(settings) == pytest.approx(3.0)
 
 
-def _fake_complete(self, prompt):
+def _fake_complete(self, prompt, max_tokens=0):
     self.budget.reserve()  # comme un vrai appel non mis en cache
     self.stats.add(call=True, prompt_tokens=1000, completion_tokens=200)
     if prompt.startswith("Revue de logique"):
         return {"findings": []}
+    if prompt.startswith("Alertes à analyser"):
+        review = {"verdict": "true_positive", "confidence": 0.9, "reason": "r", "definition": "d",
+                  "attack_scenario": "a", "business_impact": "b", "difficulty": "facile", "patched_code": ""}
+        return {"reviews": [{"id": f"A{i + 1}", **review} for i in range(prompt.count("### Alerte "))]}
     if "Dépendance vulnérable" in prompt:
         return {"definition": "d", "attack_scenario": "a", "business_impact": "b", "difficulty": "facile",
                 "fix_explanation": "f", "best_practices": []}

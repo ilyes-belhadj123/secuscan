@@ -26,6 +26,10 @@ class Settings(BaseSettings):
     openrouter_api_key: str = ""
     openrouter_model: str = "anthropic/claude-sonnet-5"
     openrouter_url: str = "https://openrouter.ai/api/v1/chat/completions"
+    # Catalogue public des modèles (liste de choix de l'écran « Paramètres »)
+    openrouter_models_url: str = "https://openrouter.ai/api/v1/models"
+    # Fichier où l'écran « Paramètres » enregistre la clé et le modèle (exclu de Git)
+    secuscan_env_file: Path = REPO_ROOT / ".env"
 
     secuscan_data_dir: Path = API_ROOT / "data"
     secuscan_ai_concurrency: int = 6

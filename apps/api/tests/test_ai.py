@@ -22,8 +22,11 @@ def test_unified_diff_uses_file_line_numbers():
     assert "-b" in diff and "+B" in diff
 
 
-def _fake_complete(self, prompt: str) -> dict:
+def _fake_complete(self, prompt: str, max_tokens: int = 0) -> dict:
     """Simule Claude : écarte la requête construite avec une constante, confirme le reste."""
+    if prompt.startswith("Alertes à analyser"):
+        blocks = prompt.split("### Alerte ")[1:]
+        return {"reviews": [{"id": b.split("\n", 1)[0], **_fake_complete(self, b)} for b in blocks]}
     if prompt.startswith("Revue de logique"):
         if "backend-python/app.py" not in prompt:
             return {"findings": []}
@@ -82,7 +85,7 @@ def test_pipeline_with_ai(monkeypatch, service):
 
 def test_prompt_never_contains_secret(monkeypatch, service, tmp_path):
     sent: list[str] = []
-    monkeypatch.setattr(Enricher, "_complete", lambda self, prompt: sent.append(prompt) or {"verdict": "uncertain"})
+    monkeypatch.setattr(Enricher, "_complete", lambda self, prompt, **kw: sent.append(prompt) or {"verdict": "uncertain"})
     project = tmp_path / "p"
     project.mkdir()
     (project / "app.py").write_text('API_KEY = "Zx9-UnitTest-Secret-Value"\nimport os\nos.system(cmd)\n')
@@ -102,3 +105,50 @@ def test_ai_unavailable_is_graceful(service, tmp_path):
     findings = service.run(scan, project)
     assert scan.status == "completed"
     assert findings[0].ai is None and findings[0].ai_error
+
+
+def _count_calls(monkeypatch, service, project) -> tuple[list[str], list]:
+    prompts: list[str] = []
+
+    def fake(self, prompt, max_tokens=0):
+        prompts.append(prompt)
+        return _fake_complete(self, prompt)
+    monkeypatch.setattr(Enricher, "_complete", fake)
+    scan = Scan(id=new_id(), project_name="Acme lots", source="upload")
+    service.storage.save_scan(scan)
+    return prompts, service.run(scan, project)
+
+
+def test_findings_of_same_file_share_one_call(monkeypatch, service, tmp_path):
+    project = tmp_path / "p"
+    project.mkdir()
+    # 5 appels système de même gravité dans un fichier : 2 appels groupés (4 + 1) au lieu de 5
+    (project / "app.py").write_text("import os\n" + "".join(f"os.system(cmd{i})\n" for i in range(5)))
+    prompts, findings = _count_calls(monkeypatch, service, project)
+    code = [f for f in findings if f.kind == "sast"]
+    assert len(code) == 5 and all(f.ai and f.ai.verdict == "true_positive" for f in code)
+    review_prompts = [p for p in prompts if not p.startswith("Revue de logique")]
+    assert len(review_prompts) == 2
+    assert review_prompts[0].startswith("Alertes à analyser : 4 alertes") or review_prompts[1].startswith(
+        "Alertes à analyser : 4 alertes")
+
+
+def test_review_missing_from_batch_is_retried_alone(monkeypatch, service, tmp_path):
+    project = tmp_path / "p"
+    project.mkdir()
+    (project / "app.py").write_text("import os\nos.system(a)\nos.system(b)\n")
+    singles: list[str] = []
+
+    def fake(self, prompt, max_tokens=0):
+        if prompt.startswith("Alertes à analyser"):
+            first = prompt.split("### Alerte ")[1]
+            return {"reviews": [{"id": "A1", **_fake_complete(self, first)}]}  # A2 oubliée
+        if prompt.startswith("Alerte à analyser"):
+            singles.append(prompt)
+        return _fake_complete(self, prompt)
+    monkeypatch.setattr(Enricher, "_complete", fake)
+    scan = Scan(id=new_id(), project_name="Acme", source="upload")
+    service.storage.save_scan(scan)
+    findings = [f for f in service.run(scan, project) if f.kind == "sast"]
+    assert len(findings) == 2 and all(f.ai for f in findings)
+    assert len(singles) == 1 and "Ligne(s) signalée(s) : 3" in singles[0]

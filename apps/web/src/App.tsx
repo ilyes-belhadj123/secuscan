@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import { Link, Navigate, Route, Routes, useNavigate } from "react-router-dom";
 import { api, type Health } from "./api";
 import AuditPage from "./pages/AuditPage";
@@ -12,6 +12,7 @@ import OperatorPage from "./pages/OperatorPage";
 import OrgPage from "./pages/OrgPage";
 import PlanPage from "./pages/PlanPage";
 import ScanPage from "./pages/ScanPage";
+import SettingsPage from "./pages/SettingsPage";
 import { isAdmin, useSession } from "./session";
 
 function Logo() {
@@ -64,6 +65,7 @@ function Topbar({ health }: { health: Health | null }) {
           <Link to="/organisation" className="small" style={{ fontWeight: 600 }}>Équipe</Link>
           <Link to="/offre" className="small" style={{ fontWeight: 600 }}>Offre {me.org.plan_name}</Link>
           {me.is_operator && <Link to="/operateur" className="small" style={{ fontWeight: 600 }}>Bêta</Link>}
+          {me.can_manage_settings && <Link to="/parametres" className="small" style={{ fontWeight: 600 }}>Paramètres</Link>}
         </>
       )}
       {health && (
@@ -87,9 +89,10 @@ function Topbar({ health }: { health: Health | null }) {
 export default function App() {
   const { me, loading } = useSession();
   const [health, setHealth] = useState<Health | null>(null);
-  useEffect(() => {
+  const loadHealth = useCallback(() => {
     api.health().then(setHealth).catch(() => setHealth(null));
   }, []);
+  useEffect(loadHealth, [loadHealth]);
 
   if (loading) return <main className="container"><span className="spinner" /></main>;
 
@@ -106,6 +109,7 @@ export default function App() {
           <Route path="/organisation" element={<OrgPage />} />
           <Route path="/offre" element={<PlanPage />} />
           <Route path="/operateur" element={me.is_operator ? <OperatorPage /> : <Navigate to="/" replace />} />
+          <Route path="/parametres" element={me.can_manage_settings ? <SettingsPage onSaved={loadHealth} /> : <Navigate to="/" replace />} />
           <Route path="/invitation/:token" element={<InvitationPage />} />
           <Route path="/reinitialisation/:token" element={<ResetPasswordPage />} />
           <Route path="*" element={<Navigate to="/" replace />} />

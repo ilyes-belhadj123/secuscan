@@ -14,7 +14,8 @@ PASSWORD = "Test-Passw0rd-42"
 def settings(tmp_path) -> Settings:
     # Aucun appel réseau pendant les tests : pas de clé IA, OSV hors ligne
     return Settings(
-        _env_file=None, openrouter_api_key="", secuscan_data_dir=tmp_path / "data", secuscan_offline=True
+        _env_file=None, openrouter_api_key="", secuscan_data_dir=tmp_path / "data", secuscan_offline=True,
+        secuscan_env_file=tmp_path / ".env",
     )
 
 

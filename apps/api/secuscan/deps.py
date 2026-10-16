@@ -68,3 +68,20 @@ def require_admin(ctx: Context = Depends(current_context)) -> Context:
     if not ctx.is_admin:
         raise HTTPException(403, "Action réservée aux administrateurs de l'organisation")
     return ctx
+
+
+def is_installation_admin(service: ScanService, ctx: Context) -> bool:
+    """Opérateur de la plateforme, ou administrateur de la première organisation créée.
+
+    Les réglages d'installation (clé IA payée pour toutes les organisations) leur sont réservés.
+    """
+    if ctx.email.lower() in {e.strip().lower() for e in service.settings.secuscan_operator_emails}:
+        return True
+    return ctx.is_admin and ctx.org_id == service.storage.installation_org_id()
+
+
+def require_installation_admin(ctx: Context = Depends(current_context),
+                               service: ScanService = Depends(get_service)) -> Context:
+    if not is_installation_admin(service, ctx):
+        raise HTTPException(403, "Réglage réservé aux administrateurs de l'installation")
+    return ctx
