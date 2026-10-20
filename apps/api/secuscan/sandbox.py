@@ -27,7 +27,7 @@ from collections.abc import Callable
 from dataclasses import asdict, dataclass, field
 from pathlib import Path
 
-from .analyzers import external, history, sast, sca, secrets
+from .analyzers import external, history, interproc, sast, sca, secrets
 from .analyzers.context import enclosing_excerpt
 from .analyzers.rules import RULES_BY_ID
 from .config import Settings
@@ -139,6 +139,14 @@ def _external_engines(settings: Settings, root: Path, code_files: dict) -> list:
 def _sast(scan_id: str, settings: Settings, redacted: dict, root: Path, existing: list[Finding]) -> list[Finding]:
     code_files = {p: s for p, s in redacted.items() if not manifest_kind(p.split("/")[-1])}
     raws = [raw for source in code_files.values() for raw in sast.analyze_file(source)]
+    # Flux d'un fichier à l'autre : alerte sur l'opération dangereuse, qui cite l'appelant
+    for flow in interproc.cross_file_flows(list(code_files.values())):
+        rule = RULES_BY_ID[flow.sink.rule_id]
+        raws.append(sast.RawFinding(
+            kind="sast", rule_id=rule.id, title=rule.title, message=interproc.describe(flow), cwe=rule.cwe,
+            severity=rule.severity, file=flow.sink.file, language=code_files[flow.sink.file].language,
+            start_line=flow.sink.line, end_line=flow.sink.line,
+        ))
     # Moteurs externes (SS-5) : une ligne déjà signalée (règle maison ou secret) n'est pas dupliquée
     flagged = {(f.file, f.start_line) for f in existing} | {(r.file, r.start_line) for r in raws}
     raws += [r for r in _external_engines(settings, root, code_files) if (r.file, r.start_line) not in flagged]

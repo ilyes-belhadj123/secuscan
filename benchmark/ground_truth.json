@@ -506,7 +506,72 @@
             "cwe": "CWE-668"
           }
         ],
-        "iac/safe/docker-compose.yml": []
+        "iac/safe/docker-compose.yml": [],
+        "crossfile/python/routes.py": [],
+        "crossfile/python/routes_safe.py": [],
+        "crossfile/python/storage_safe.py": [],
+        "crossfile/javascript/routes.js": [],
+        "crossfile/javascript/routes_safe.js": [],
+        "crossfile/javascript/files_safe.js": [],
+        "crossfile/php/index.php": [],
+        "crossfile/php/index_safe.php": [],
+        "crossfile/php/lib_safe.php": [],
+        "crossfile/java/DocumentController.java": [],
+        "crossfile/java/InvoiceController.java": [],
+        "crossfile/java/InvoiceStore.java": [],
+        "crossfile/go/server.go": [],
+        "crossfile/go/server_safe.go": [],
+        "crossfile/go/store_safe.go": [],
+        "crossfile/python/storage.py": [
+          {
+            "contains": "open(ATTACHMENTS + filename",
+            "cwe": "CWE-22"
+          },
+          {
+            "contains": "requests.get(target",
+            "cwe": "CWE-918"
+          }
+        ],
+        "crossfile/javascript/files.js": [
+          {
+            "contains": "fs.readFile(\"/srv/uploads/\" + fileName",
+            "cwe": "CWE-22"
+          },
+          {
+            "contains": "axios.get(feedUrl)",
+            "cwe": "CWE-918"
+          }
+        ],
+        "crossfile/php/lib.php": [
+          {
+            "contains": "readfile('/srv/attachments/' . $name)",
+            "cwe": "CWE-22"
+          },
+          {
+            "contains": "file_get_contents($url)",
+            "cwe": "CWE-918"
+          }
+        ],
+        "crossfile/java/DocumentStore.java": [
+          {
+            "contains": "Paths.get(\"/srv/documents/\" + fileName)",
+            "cwe": "CWE-22"
+          },
+          {
+            "contains": "new URL(address)",
+            "cwe": "CWE-918"
+          }
+        ],
+        "crossfile/go/store.go": [
+          {
+            "contains": "os.ReadFile(\"/srv/attachments/\" + name)",
+            "cwe": "CWE-22"
+          },
+          {
+            "contains": "http.Get(target)",
+            "cwe": "CWE-918"
+          }
+        ]
       }
     },
     {
