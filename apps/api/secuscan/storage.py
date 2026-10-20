@@ -154,6 +154,11 @@ CREATE TABLE IF NOT EXISTS password_resets (
     used_at TEXT,
     created_at TEXT NOT NULL
 );
+CREATE TABLE IF NOT EXISTS org_logos (
+    org_id TEXT PRIMARY KEY,
+    png BLOB NOT NULL,
+    updated_at TEXT NOT NULL
+);
 CREATE TABLE IF NOT EXISTS sessions (
     token_hash TEXT PRIMARY KEY,
     user_id TEXT NOT NULL,
@@ -424,6 +429,20 @@ class Storage:
                 f"SELECT {', '.join(keys)} FROM invoices WHERE org_id = ? ORDER BY created_at DESC", (org_id,)
             ).fetchall()
         return [dict(zip(keys, r, strict=True)) for r in rows]
+
+    # --- Logo des rapports (SS-18) ---------------------------------------
+    def set_org_logo(self, org_id: str, png: bytes) -> None:
+        with self._lock, self._conn() as conn:
+            conn.execute("INSERT OR REPLACE INTO org_logos VALUES (?, ?, ?)", (org_id, png, now_iso()))
+
+    def get_org_logo(self, org_id: str) -> bytes | None:
+        with self._conn() as conn:
+            row = conn.execute("SELECT png FROM org_logos WHERE org_id = ?", (org_id,)).fetchone()
+        return bytes(row[0]) if row else None
+
+    def delete_org_logo(self, org_id: str) -> bool:
+        with self._lock, self._conn() as conn:
+            return conn.execute("DELETE FROM org_logos WHERE org_id = ?", (org_id,)).rowcount > 0
 
     def installation_org_id(self) -> str | None:
         """Première organisation créée : celle du propriétaire de l'installation."""

@@ -67,6 +67,10 @@ class Result:
     # SS-11 : validité syntaxique des correctifs proposés (True / False / None = non vérifiable)
     fix_checks: list[bool | None] = field(default_factory=list)
     invalid_fixes: list[Finding] = field(default_factory=list)
+    fix_retries: int = 0
+    fixes_repaired: int = 0
+    ai_calls: int = 0
+    ai_cost_usd: float = 0.0
 
     def stats(self, language: str | None = None) -> dict:
         exp = [e for e in self.expected if language is None or e.language == language]
@@ -141,6 +145,11 @@ def run(with_ai: bool, truth: Path) -> Result:
             storage.save_scan(scan)
             match(expected, service.run(scan, root), result)
             result.expected += expected
+            sm = scan.summary
+            result.ai_calls += sm.ai_calls
+            result.ai_cost_usd += sm.ai_cost_usd
+            result.fix_retries += sm.ai_fix_retries
+            result.fixes_repaired += sm.ai_fixes_repaired
     return result
 
 
@@ -166,6 +175,8 @@ def to_markdown(result: Result) -> str:
     out.append(f"| **Total** | **{total['tp']}** | **{total['fn']}** | **{total['fp']}** | "
                f"**{_pct(total['recall'])}** | **{_pct(total['fp_rate'])}** |")
     out += ["", f"Alertes écartées par la validation IA : {result.rejected_by_ai} · doublons : {result.duplicates}", ""]
+    if result.ai_calls:
+        out += [f"Appels IA : {result.ai_calls} · coût estimé : {result.ai_cost_usd:.2f} $", ""]
     if result.fix_checks:
         valid = sum(1 for c in result.fix_checks if c is True)
         invalid = sum(1 for c in result.fix_checks if c is False)
@@ -176,6 +187,9 @@ def to_markdown(result: Result) -> str:
             f"({_pct(valid / checked if checked else None)}) · non vérifiables : {len(result.fix_checks) - checked}",
             "",
         ]
+        if result.fix_retries:
+            out += [f"Correctifs invalides relancés auprès de l'IA : {result.fix_retries} · rendus valides : "
+                    f"{result.fixes_repaired}", ""]
         out += [f"- Syntaxe invalide : `{f.file}:{f.start_line}` {f.rule_id}" for f in result.invalid_fixes]
         out.append("")
     out += ["## Failles manquées", ""]

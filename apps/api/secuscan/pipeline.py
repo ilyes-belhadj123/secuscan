@@ -436,6 +436,8 @@ class ScanService:
         s.ai_tokens = enricher.stats.tokens
         s.ai_cost_usd = round(enricher.stats.cost_usd(self.settings), 4)
         s.ai_budget_calls = enricher.budget.max_calls
+        s.ai_fix_retries = enricher.stats.fix_retries
+        s.ai_fixes_repaired = enricher.stats.fixes_repaired
         s.plan = self._plan(scan)
 
     def _plan(self, scan: Scan) -> str:

@@ -2,6 +2,7 @@
 
 Usage (dans apps/api) :
     uv run python -m secuscan.cli scan CHEMIN [--fail-on high] [--format text|json|sarif] [--output FICHIER]
+                                              [--pr-comment]
 
 Configuration facultative : fichier `.secuscan.yml` à la racine du projet analysé (voir
 docs/integration-ci.md). Les options de la ligne de commande priment sur le fichier.
@@ -14,15 +15,18 @@ Codes retour :
 """
 import argparse
 import json
+import os
 import sys
 from dataclasses import dataclass, field
 from pathlib import Path
 
+import httpx
 import yaml
 
 from .config import Settings, get_settings
 from .models import SEVERITY_ORDER, Finding, Scan, Severity
 from .pipeline import ScanService, new_id
+from .prcomments import PRCommentError, provider_from_env, publish
 from .reports import SEVERITY_LABELS, build_json
 from .sarif import build_sarif
 from .storage import Storage
@@ -129,6 +133,8 @@ def main(argv: list[str] | None = None) -> int:
     scan_cmd.add_argument("--exclude", action="append", default=[], help="motif à exclure (répétable)")
     scan_cmd.add_argument("--ai", action="store_true", help="activer l'enrichissement IA (clé OpenRouter requise)")
     scan_cmd.add_argument("--offline", action="store_true", help="sans appel réseau (base OSV depuis le cache)")
+    scan_cmd.add_argument("--pr-comment", action="store_true",
+                          help="commenter la pull request (GitHub Actions) ou la merge request (GitLab CI)")
     args = parser.parse_args(argv)
 
     if hasattr(sys.stdout, "reconfigure"):
@@ -167,6 +173,13 @@ def main(argv: list[str] | None = None) -> int:
         print(report)
 
     blockers = blocking(findings, config.fail_on)
+    if args.pr_comment:
+        # Un échec de publication est signalé mais ne change pas le verdict de l'analyse
+        try:
+            print(publish(provider_from_env(os.environ), scan, findings, config.fail_on, len(blockers)),
+                  file=sys.stderr)
+        except (PRCommentError, httpx.HTTPError, OSError, KeyError, ValueError) as exc:
+            print(f"Commentaires de PR non publiés : {exc}", file=sys.stderr)
     if blockers:
         print(f"\nÉchec : {len(blockers)} alerte(s) de sévérité « {config.fail_on} » ou supérieure.", file=sys.stderr)
         return EXIT_THRESHOLD

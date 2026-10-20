@@ -1,3 +1,5 @@
+import pytest
+
 from secuscan.ai import enricher as enricher_mod
 from secuscan.ai.enricher import Enricher, _extract_json, unified_diff
 from secuscan.ai.safety import REDACTED, sanitize
@@ -152,3 +154,44 @@ def test_review_missing_from_batch_is_retried_alone(monkeypatch, service, tmp_pa
     findings = [f for f in service.run(scan, project) if f.kind == "sast"]
     assert len(findings) == 2 and all(f.ai for f in findings)
     assert len(singles) == 1 and "Ligne(s) signalée(s) : 3" in singles[0]
+
+
+def _broken_then(fixed: str | None):
+    """Première réponse : correctif à la syntaxe cassée ; relance : `fixed` (None = encore cassé)."""
+    retries: list[str] = []
+
+    def fake(self, prompt, max_tokens=0):
+        if prompt.startswith("Revue de logique"):
+            return {"findings": []}
+        if prompt.startswith("Correctif à reprendre"):
+            retries.append(prompt)
+            return {"patched_code": fixed or "os.system((", "fix_explanation": "Liste d'arguments."}
+        return {"verdict": "true_positive", "confidence": 0.9, "reason": "r", "definition": "d",
+                "attack_scenario": "a", "business_impact": "b", "difficulty": "facile",
+                "patched_code": "subprocess.run([cmd]", "fix_explanation": "Premier essai."}
+    return fake, retries
+
+
+@pytest.mark.parametrize("fixed", ["subprocess.run([cmd], check=True)", None])
+def test_invalid_fix_is_retried_once(monkeypatch, service, tmp_path, fixed):
+    fake, retries = _broken_then(fixed)
+    monkeypatch.setattr(Enricher, "_complete", fake)
+    project = tmp_path / "p"
+    project.mkdir()
+    (project / "app.py").write_text("import os\nimport subprocess\nos.system(cmd)\n")
+    scan = Scan(id=new_id(), project_name="Acme", source="upload")
+    service.storage.save_scan(scan)
+    finding = next(f for f in service.run(scan, project) if f.kind == "sast")
+    assert len(retries) == 1 and "ligne 1 : '(' was never closed" in retries[0]  # erreur localisée
+    if fixed:
+        assert finding.ai.fix.syntax_valid is True and finding.ai.fix.patched_code == fixed
+        assert finding.ai.fix.explanation == "Liste d'arguments."
+    else:  # relance encore invalide : le premier correctif reste, signalé invalide
+        assert finding.ai.fix.syntax_valid is False and finding.ai.fix.explanation == "Premier essai."
+
+
+def test_first_error_locates_line():
+    from secuscan.analyzers.syntax import first_error
+    assert first_error("python", "x = 1\ny = (\n") .startswith("ligne 2")
+    assert first_error("javascript", "const a = 1;\nfunction f( {\n").startswith("ligne 2")
+    assert first_error("java", "class A { void f() { int x = 1; } }") is None

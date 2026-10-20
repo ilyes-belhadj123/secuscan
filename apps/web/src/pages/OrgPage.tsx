@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useState, type FormEvent } from "react";
 import { Link, useNavigate } from "react-router-dom";
 import { api, type OrgDetails, type Role } from "../api";
+import LogoCard from "../components/LogoCard";
 import { formatDate } from "../labels";
 import { isAdmin, useSession } from "../session";
 
@@ -115,6 +116,8 @@ export default function OrgPage() {
           )}
         </section>
       )}
+
+      {admin && <LogoCard whiteLabel={me.org.features.includes("white_label")} />}
 
       <section className="card">
         <div className="card-title"><h2>Membres</h2><span className="muted small">{org.members.length} membre(s)</span></div>

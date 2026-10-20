@@ -332,6 +332,12 @@ export const api = {
     request(`/api/auth/password-reset/${token}`, send("POST", { password })),
   switchOrg: (org_id: string) => request("/api/auth/switch-org", send("POST", { org_id })),
   org: () => request<OrgDetails>("/api/org"),
+  uploadLogo: (file: File) => {
+    const form = new FormData();
+    form.append("file", file);
+    return request("/api/org/logo", { method: "PUT", body: form });
+  },
+  deleteLogo: () => request("/api/org/logo", send("DELETE")),
   invite: (email: string, role: Role) =>
     request<{ url: string; email: string; email_sent: boolean; email_detail: string }>(
       "/api/org/invitations", send("POST", { email, role })),

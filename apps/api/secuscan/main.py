@@ -16,6 +16,8 @@ from .ai_settings import router as ai_settings_router
 from .beta import router as beta_router
 from .billing import check_scan_quota
 from .billing import router as billing_router
+from .branding import report_logo
+from .branding import router as branding_router
 from .config import DEMO_PROJECT_DIR, Settings, get_settings
 from .deps import Context, current_context, get_service, require_admin
 from .gitproviders import clone_auth, provider_or_404
@@ -41,6 +43,7 @@ app.include_router(billing_router)
 app.include_router(git_router)
 app.include_router(beta_router)
 app.include_router(ai_settings_router)
+app.include_router(branding_router)
 
 _UNSAFE_METHODS = {"POST", "PUT", "PATCH", "DELETE"}
 
@@ -304,9 +307,11 @@ def report_pdf(
     org = service.storage.get_org(ctx.org_id)
     if prepared_by and not has_feature(org["plan"], "white_label"):
         raise HTTPException(402, "La marque blanche (« Réalisé par ») est incluse dans l'offre Business.")
-    pdf = build_pdf(scan, service.storage.list_findings(scan_id), prepared_for, prepared_by)
+    logo = report_logo(service, ctx.org_id)
+    pdf = build_pdf(scan, service.storage.list_findings(scan_id), prepared_for, prepared_by, logo)
     _audit(service, ctx, "report.exported", scan_id,
-           {"format": "pdf", "project": scan.project_name, "prepared_for": prepared_for, "prepared_by": prepared_by})
+           {"format": "pdf", "project": scan.project_name, "prepared_for": prepared_for, "prepared_by": prepared_by,
+            "logo": logo is not None})
     name = _safe_filename(f"secuscan-{scan.project_name}-{scan.id}") + ".pdf"
     return Response(pdf, media_type="application/pdf", headers={"Content-Disposition": f'attachment; filename="{name}"'})
 

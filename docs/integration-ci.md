@@ -16,6 +16,7 @@ uv run python -m secuscan.cli scan CHEMIN [--fail-on high] [--format text|json|s
 | `--exclude MOTIF` | Exclut des fichiers (répétable), ex. `--exclude tests/ --exclude "*.min.js"` |
 | `--ai` | Active l'IA (validation des faux positifs, explications, correctifs) : nécessite `OPENROUTER_API_KEY` et consomme des crédits |
 | `--offline` | Aucun appel réseau : les dépendances ne sont vérifiées que si elles sont déjà en cache |
+| `--pr-comment` | Commente la pull request (GitHub) ou la merge request (GitLab) : voir plus bas |
 
 ## Codes retour
 
@@ -102,4 +103,64 @@ secuscan:
   artifacts:
     when: always
     paths: [secuscan.sarif]
+```
+
+## Commentaires sur les pull requests et merge requests (SS-22)
+
+Avec `--pr-comment`, SecuScan commente directement la revue de code :
+
+- **un commentaire en ligne par alerte située sur une ligne ajoutée ou modifiée par la PR** (au
+  plus 25), avec l'explication et le correctif proposé quand l'IA est activée (`--ai`) ;
+- **un commentaire de synthèse** (score, alertes par sévérité, seuil de blocage), mis à jour à
+  chaque exécution au lieu d'être dupliqué ;
+- une alerte déjà commentée n'est pas commentée une seconde fois après un nouveau push.
+
+Les alertes des lignes que la PR ne touche pas ne sont pas commentées en ligne : elles figurent dans
+la synthèse. Un échec de publication (jeton manquant, droits insuffisants) est affiché mais ne
+change pas le code retour de l'analyse. Analysez la racine du dépôt : les chemins des alertes
+doivent correspondre à ceux de la PR.
+
+### GitHub Actions
+
+Le jeton fourni par GitHub suffit ; il faut seulement l'autoriser à écrire sur les pull requests.
+
+```yaml
+on: pull_request
+
+jobs:
+  secuscan:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      pull-requests: write
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v6
+      - run: uv sync
+        working-directory: apps/api
+      - name: Analyse SecuScan et commentaires de PR
+        working-directory: apps/api
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          OPENROUTER_API_KEY: ${{ secrets.OPENROUTER_API_KEY }}   # facultatif, avec --ai
+        run: uv run python -m secuscan.cli scan ../.. --pr-comment --ai
+```
+
+Pour une PR ouverte depuis un fork, GitHub ne donne qu'un jeton en lecture : les commentaires ne
+sont alors pas publiés (l'analyse et son code retour restent valables).
+
+### GitLab CI
+
+Le jeton automatique du job (`CI_JOB_TOKEN`) ne peut pas commenter : créez un **jeton d'accès au
+projet** (Paramètres → Jetons d'accès, rôle Developer, portée `api`) et déclarez-le comme variable
+CI/CD masquée `SECUSCAN_GITLAB_TOKEN`.
+
+```yaml
+secuscan:
+  image: ghcr.io/astral-sh/uv:python3.12-bookworm
+  rules:
+    - if: $CI_PIPELINE_SOURCE == "merge_request_event"
+  script:
+    - cd apps/api && uv sync
+    - uv run python -m secuscan.cli scan ../.. --pr-comment
 ```

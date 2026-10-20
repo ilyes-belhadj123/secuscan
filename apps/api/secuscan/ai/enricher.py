@@ -15,7 +15,7 @@ from dataclasses import dataclass
 
 import httpx
 
-from ..analyzers.syntax import patch_is_valid
+from ..analyzers.syntax import first_error, patch_is_valid, splice
 from ..config import Settings
 from ..ingest import SourceFile
 from ..models import AIReview, Explanation, Finding, FixSuggestion, Severity
@@ -26,6 +26,7 @@ from .prompts import (
     DEPENDENCY_TEMPLATE,
     FINDING_TEMPLATE,
     FINDINGS_BATCH_TEMPLATE,
+    FIX_RETRY_TEMPLATE,
     LOGIC_TEMPLATE,
     PROMPT_VERSION,
     SYSTEM_PROMPT,
@@ -96,6 +97,9 @@ class AIStats:
     cache_hits: int = 0
     prompt_tokens: int = 0
     completion_tokens: int = 0
+    # Correctifs invalides relancés auprès de l'IA, et parmi eux ceux rendus valides (SS-11)
+    fix_retries: int = 0
+    fixes_repaired: int = 0
 
     def __post_init__(self):
         self._lock = threading.Lock()
@@ -104,10 +108,13 @@ class AIStats:
     def tokens(self) -> int:
         return self.prompt_tokens + self.completion_tokens
 
-    def add(self, *, call: bool = False, hit: bool = False, prompt_tokens: int = 0, completion_tokens: int = 0) -> None:
+    def add(self, *, call: bool = False, hit: bool = False, prompt_tokens: int = 0, completion_tokens: int = 0,
+            fix_retry: bool = False, fix_repaired: bool = False) -> None:
         with self._lock:
             self.calls += int(call)
             self.cache_hits += int(hit)
+            self.fix_retries += int(fix_retry)
+            self.fixes_repaired += int(fix_repaired)
             self.prompt_tokens += prompt_tokens
             self.completion_tokens += completion_tokens
 
@@ -283,6 +290,36 @@ class Enricher:
                 results[finding.id] = exc
         return results
 
+    @staticmethod
+    def _patch_valid(finding: Finding, patched: str, file_content: str | None) -> bool | None:
+        return patch_is_valid(
+            finding.language, patched, original=finding.snippet, file_content=file_content,
+            start_line=finding.snippet_start_line, filename=finding.file,
+        )
+
+    def _retry_fix(self, finding: Finding, patched: str, file_content: str | None) -> tuple[str, str] | None:
+        """Nouveau correctif valide et son explication, ou None (l'ancien correctif reste, signalé invalide)."""
+        if file_content is not None:
+            end_line = finding.snippet_start_line + finding.snippet.count("\n")
+            error = first_error(finding.language, splice(file_content, finding.snippet_start_line, end_line, patched),
+                                finding.file)
+        else:
+            error = first_error(finding.language, patched, finding.file)
+        prompt = FIX_RETRY_TEMPLATE.format(
+            language=finding.language, file=finding.file, patched=patched, error=error or "erreur non localisée",
+            **self._alert_fields(finding),
+        )
+        try:
+            data = self._complete(prompt)
+        except AIUnavailable:
+            return None  # budget atteint ou IA indisponible : on garde le premier correctif
+        self.stats.add(fix_retry=True)
+        new = str(data.get("patched_code") or "").rstrip("\n")
+        if not new or new.strip() == finding.snippet.strip() or not self._patch_valid(finding, new, file_content):
+            return None
+        self.stats.add(fix_repaired=True)
+        return new, str(data.get("fix_explanation") or "")
+
     def _code_review(self, finding: Finding, data: dict, file_content: str | None) -> AIReview:
         filtered = False
 
@@ -309,11 +346,17 @@ class Enricher:
                 diff=unified_diff(finding.snippet, patched, finding.file, finding.snippet_start_line),
                 explanation=clean(data.get("fix_explanation")),
                 best_practices=[clean(p) for p in (data.get("best_practices") or [])][:5],
-                syntax_valid=patch_is_valid(
-                    finding.language, patched, original=finding.snippet, file_content=file_content,
-                    start_line=finding.snippet_start_line, filename=finding.file,
-                ),
+                syntax_valid=self._patch_valid(finding, patched, file_content),
             )
+            # Correctif invalide : une seule relance, avec l'erreur localisée (SS-11)
+            if fix.syntax_valid is False and verdict != "false_positive":
+                retried = self._retry_fix(finding, patched, file_content)
+                if retried:
+                    patched, fix_explanation = retried
+                    fix.patched_code = patched
+                    fix.diff = unified_diff(finding.snippet, patched, finding.file, finding.snippet_start_line)
+                    fix.explanation = clean(fix_explanation) or fix.explanation
+                    fix.syntax_valid = True
         explanation = Explanation(
             definition=clean(data.get("definition")),
             attack_scenario=clean(data.get("attack_scenario")),

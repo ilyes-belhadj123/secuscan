@@ -20,8 +20,8 @@ Mesure du 23/09/2026 sur 83 failles annotées (4 langages) — rapport complet :
 | Mode | Taux de détection | Taux de faux positifs | Objectif cahier des charges |
 |---|---|---|---|
 | Règles seules | **98 %** (81/83) | **5 %** (4) | > 85 % / < 15 % |
-| Règles + IA (Claude, réel) | **100 %** (83/83) | **7 %** (6) | > 85 % / < 15 % |
-| Correctifs syntaxiquement valides | **100 %** (89/89) | | > 80 % |
+| Règles + IA (Claude, réel, alertes relues par lots) | **100 %** (86/86) | **7 %** (6) | > 85 % / < 15 % |
+| Correctifs syntaxiquement valides | **100 %** (92/92, dont 1 réparé par relance) | | > 80 % |
 
 Rapport IA : [benchmark/results/latest-ai.md](../benchmark/results/latest-ai.md). L'IA trouve les 2 failles
 logiques hors de portée des règles et écarte les faux positifs de construction de requête avec une
@@ -62,8 +62,8 @@ volontairement vulnérable « Acme Shop » (4 langages).
 |---|---|---|---|---|
 | SS-9 | Validation contextuelle des alertes | ✅ | Fonction englobante + imports + constantes du module, verdict JSON, faux positifs masqués ; **7 % de faux positifs mesurés avec le vrai modèle** | — |
 | SS-10 | Explication pédagogique | ✅ | Prompt français, scénario conceptuel, filtre de sortie anti-charge offensive ; [relecture de 30 explications réelles](qa/relecture-SS-10.md) : 26/30 sans remarque, 4 défauts corrigés (prompt v2) | Contre-relecture par un expert sécurité humain avant la bêta |
-| SS-11 | Proposition de correctif | ✅ | Diff avant/après, bouton copier, vérification syntaxique dans les 4 langages (tree-sitter + ast), correctif replacé dans le fichier complet ; **89/89 correctifs valides (100 %)** sur le benchmark | Relance automatique de l'IA si un correctif est invalide |
-| SS-12 | Maîtrise des coûts IA | ✅ | Budget par analyse et par offre (Free 40 / Pro 150 / Business 500 appels), priorisation par gravité, revue logique limitée aux fichiers exposés, dépendances peu graves expliquées sans IA (base OSV), cache par empreinte, coût estimé par analyse + page « Coûts IA ». Mesuré : NodeGoat (3 087 lignes) **0,97 $** ; **alertes d'un même fichier et de même gravité relues par lots de 4 en un appel** (55 % d'appels en moins sur Acme Shop et le benchmark, en simulation) ; modèle et clé réglables depuis l'écran « Paramètres » (tarif du modèle repris pour l'estimation) | Mesurer la qualité des réponses groupées avec le vrai modèle (benchmark `--ai`) |
+| SS-11 | Proposition de correctif | ✅ | Diff avant/après, bouton copier, vérification syntaxique dans les 4 langages (tree-sitter + ast), correctif replacé dans le fichier complet ; **89/89 correctifs valides (100 %)** sur le benchmark ; **correctif invalide relancé une fois auprès de l'IA avec l'erreur localisée** (ligne et nature de l'erreur) | — |
+| SS-12 | Maîtrise des coûts IA | ✅ | Budget par analyse et par offre (Free 40 / Pro 150 / Business 500 appels), priorisation par gravité, revue logique limitée aux fichiers exposés, dépendances peu graves expliquées sans IA (base OSV), cache par empreinte, coût estimé par analyse + page « Coûts IA ». Mesuré : NodeGoat (3 087 lignes) **0,97 $** ; **alertes d'un même fichier et de même gravité relues par lots de 4 en un appel** (55 % d'appels en moins sur Acme Shop et le benchmark, en simulation) ; modèle et clé réglables depuis l'écran « Paramètres » (tarif du modèle repris pour l'estimation) ; benchmark réel avec lots : 100 % de détection, 7 % de faux positifs, **29 appels pour 0,89 $** | — |
 | SS-13 | Classification et sévérité | ✅ | Mapping CWE → OWASP Top 10 2025, 4 niveaux, règles de scoring documentées | — |
 
 ## Sprint 4 — Produit
@@ -74,7 +74,7 @@ volontairement vulnérable « Acme Shop » (4 langages).
 | SS-15 | Tableau de bord projet | ✅ | Score 0-100 + note, graphiques sévérité et OWASP, évolution, comparaison avec l'analyse précédente | — |
 | SS-16 | Ignorer une alerte avec justification | ✅ | Justification obligatoire, empreinte stable entre analyses, audit | — |
 | SS-17 | Connexion GitHub / GitLab | 🟡 | Dépôts publics par URL ; **OAuth GitHub et GitLab** (état anti-CSRF à usage unique), dépôts privés, jetons chiffrés AES-256-GCM liés à l'organisation et à l'utilisateur, jeton transmis à git hors ligne de commande, choix du dépôt et de la branche, rafraîchissement des jetons GitLab ; testé avec GitHub simulé ([guide](connexion-github.md)) | **Créer l'application OAuth GitHub** (à faire par le propriétaire du compte) puis valider sur le vrai GitHub ; GitHub App pour une lecture seule stricte |
-| SS-18 | Export PDF et JSON | ✅ | PDF (marque blanche : client / société), JSON + schéma publié | Logo de l'organisation |
+| SS-18 | Export PDF et JSON | ✅ | PDF (marque blanche : client / société), JSON + schéma publié ; **logo de l'organisation en tête du PDF** (offre Business, image réencodée en PNG) | — |
 | SS-19 | Journal d'audit | ✅ | Ajout seul, par organisation, réservé aux administrateurs, auteur de chaque action ; analyses, alertes ignorées, exports, membres (invitation, arrivée, rôle, départ) | — |
 | SS-20 | Offres Free / Pro / Business | 🟡 | Offre par organisation ; quotas appliqués côté serveur (Free : 5 analyses / mois, 1 projet, 3 membres ; Pro : 100 ; Business : 500 + marque blanche), budget IA selon l'offre, changement d'offre par le propriétaire avec contrôle de l'usage, factures pro forma, webhook de paiement signé (HMAC), page « Offre et facturation » | Brancher un vrai prestataire de paiement (Stripe…) ; **valider les tarifs** (29 € / 79 € HT par membre et par mois : provisoires) |
 
@@ -83,7 +83,7 @@ volontairement vulnérable « Acme Shop » (4 langages).
 | Ticket | Titre | Statut |
 |---|---|---|
 | SS-21 | Bêta 10 équipes pilotes | 🟡 outillage prêt : retours sur chaque correctif (taux d'acceptation), suivi des copies, questionnaire à J+14 (NPS), tableau de bord opérateur ; [guide des équipes](beta/guide-equipes-pilotes.md) et [plan de bêta](beta/plan-beta.md) — **reste : recruter les équipes et mener la bêta** (hébergement en ligne requis) |
-| SS-22 | Commentaires automatiques sur pull requests (V2) | ⬜ |
+| SS-22 | Commentaires automatiques sur pull requests (V2) | ✅ `secuscan scan --pr-comment` depuis la CI : commentaire en ligne par alerte sur les lignes modifiées (correctif IA inclus), synthèse unique mise à jour, pas de doublon ; GitHub Actions (jeton du job) et GitLab CI (jeton de projet) ; [doc](integration-ci.md) — reste : valider sur un vrai dépôt |
 | SS-23 | Job CI/CD bloquant (V2) | ✅ commande `secuscan scan` (seuil, codes retour documentés, `.secuscan.yml`, SARIF, suppression justifiée dans le code) ; [doc d'intégration](integration-ci.md) GitHub / GitLab ; SecuScan s'analyse lui-même en CI |
 | SS-24 | Mode formation (V2) | ⬜ |
 

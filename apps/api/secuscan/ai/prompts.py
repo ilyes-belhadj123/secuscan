@@ -100,6 +100,29 @@ Extrait concerné (lignes {start}-{end}, numérotées pour référence) :
 {numbered}
 ```"""
 
+FIX_RETRY_TEMPLATE = """Correctif à reprendre : erreur de syntaxe
+- Règle : {rule_id} — {title}
+- Langage : {language}
+- Fichier : {file}
+
+Extrait d'origine (lignes {start}-{end}, numérotées pour référence) :
+```
+{numbered}
+```
+
+Correctif proposé, qui introduit une erreur de syntaxe une fois replacé dans le fichier ({error}) :
+```
+{patched}
+```
+
+Réécris ce correctif : même portion de code (lignes {start}-{end}), même protection, même comportement
+métier, syntaxe valide une fois replacé dans le fichier, sans numéros de ligne.
+Réponds avec exactement cet objet JSON :
+{{
+  "patched_code": "l'extrait complet réécrit avec le correctif",
+  "fix_explanation": "ce que change le correctif et pourquoi il protège"
+}}"""
+
 LOGIC_TEMPLATE = """Revue de logique de sécurité d'un fichier complet
 - Fichier : {file}
 - Langage : {language}

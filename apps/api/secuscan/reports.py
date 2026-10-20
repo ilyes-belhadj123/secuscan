@@ -8,7 +8,9 @@ from reportlab.lib.enums import TA_CENTER
 from reportlab.lib.pagesizes import A4
 from reportlab.lib.styles import ParagraphStyle, getSampleStyleSheet
 from reportlab.lib.units import mm
+from reportlab.lib.utils import ImageReader
 from reportlab.platypus import (
+    Image,
     KeepTogether,
     PageBreak,
     Paragraph,
@@ -74,10 +76,21 @@ def _sorted(findings: list[Finding]) -> list[Finding]:
     return sorted(findings, key=lambda f: (SEVERITY_ORDER[f.severity], f.file, f.start_line))
 
 
+def _logo(png: bytes) -> Image:
+    """Logo de l'organisation sur 14 mm de haut, proportions conservées (largeur bornée à 60 mm)."""
+    width, height = ImageReader(io.BytesIO(png)).getSize()
+    h = 14 * mm
+    w = min(60 * mm, h * width / height)
+    img = Image(io.BytesIO(png), width=w, height=w * height / width)
+    img.hAlign = "LEFT"
+    return img
+
+
 def build_pdf(
-    scan: Scan, findings: list[Finding], prepared_for: str | None = None, prepared_by: str | None = None
+    scan: Scan, findings: list[Finding], prepared_for: str | None = None, prepared_by: str | None = None,
+    logo: bytes | None = None,
 ) -> bytes:
-    """Rapport PDF. `prepared_by` renseigné = marque blanche : le nom de l'ESN remplace SecuScan."""
+    """Rapport PDF. `prepared_by` ou `logo` renseigné = marque blanche : l'ESN remplace SecuScan."""
     st = _styles()
     buf = io.BytesIO()
     brand = prepared_by or "SecuScan"
@@ -89,6 +102,8 @@ def build_pdf(
     date = datetime.fromisoformat(scan.completed_at or scan.created_at).strftime("%d/%m/%Y %H:%M")
     s = scan.summary
     story = []
+    if logo:
+        story += [_logo(logo), Spacer(1, 3 * mm)]
     if prepared_by:
         story.append(Paragraph(f"<font color='#1D4ED8'><b>{escape(prepared_by)}</b></font>", st["h3"]))
     story += [

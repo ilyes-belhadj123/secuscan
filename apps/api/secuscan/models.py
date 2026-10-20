@@ -123,6 +123,9 @@ class ScanSummary(BaseModel):
     ai_errors: int = 0
     ai_cost_usd: float = 0.0
     ai_budget_calls: int = 0
+    # Correctifs invalides relancés (SS-11) et, parmi eux, rendus valides par la relance
+    ai_fix_retries: int = 0
+    ai_fixes_repaired: int = 0
     ai_budget_refused: int = 0
     plan: str = ""
     # Limites de l'analyse à signaler à l'utilisateur (ex. base de vulnérabilités injoignable)

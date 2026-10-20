@@ -63,6 +63,29 @@ def count_errors(language: str, code: str, filename: str = "") -> int | None:
     return errors
 
 
+def first_error(language: str, code: str, filename: str = "") -> str | None:
+    """Première erreur de syntaxe, décrite pour l'IA (« ligne 12 : … »), None s'il n'y en a pas."""
+    if language == "python":
+        try:
+            ast.parse(textwrap.dedent(code))
+        except SyntaxError as exc:
+            return f"ligne {exc.lineno} : {exc.msg}"
+        return None
+    grammar = _grammar_for(language, code, filename)
+    if grammar is None:
+        return None
+    stack = [_parser(grammar).parse(code.encode("utf-8")).root_node]
+    while stack:
+        node = stack.pop()
+        if node.is_missing:
+            return f"ligne {node.start_point[0] + 1} : « {node.type} » manquant"
+        if node.type == "ERROR":
+            return f"ligne {node.start_point[0] + 1} : syntaxe inattendue"
+        if node.has_error:
+            stack.extend(reversed(node.children))  # parcours dans l'ordre du code
+    return None
+
+
 def splice(file_content: str, start_line: int, end_line: int, patched: str) -> str:
     """Remplace les lignes start..end (1-indexées, incluses) du fichier par le correctif."""
     lines = file_content.split("\n")
