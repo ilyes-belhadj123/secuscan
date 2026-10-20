@@ -8,7 +8,8 @@ from dataclasses import dataclass
 
 from ..ingest import SourceFile
 from ..models import Severity
-from .rules import RULES, Rule
+from .rules import RULES, RULES_BY_ID, Rule
+from .taint import describe, find_flows
 
 _COMMENT_LINE = re.compile(r"^\s*(#|//|/\*|\*)")
 
@@ -62,4 +63,23 @@ def analyze_file(source: SourceFile, rules: list[Rule] = RULES) -> list[RawFindi
                     end_line=idx + 1,
                 )
             )
+    if rules is RULES:
+        results += _flows(source, results)
     return results
+
+
+def _flows(source: SourceFile, line_findings: list[RawFinding]) -> list[RawFinding]:
+    """Alertes de flux (taint.py), sauf sur une ligne déjà signalée pour la même faille."""
+    flagged = {(f.start_line, f.cwe) for f in line_findings}
+    out = []
+    for flow in find_flows(source):
+        rule = RULES_BY_ID[flow.rule_id]
+        # Déjà signalée sur la ligne du puits, ou sur celle où la valeur a été construite (même faille)
+        if (flow.line, rule.cwe) in flagged or (flow.assigned_line, rule.cwe) in flagged:
+            continue
+        out.append(RawFinding(
+            kind="sast", rule_id=rule.id, title=rule.title, message=describe(flow), cwe=rule.cwe,
+            severity=rule.severity, file=source.path, language=source.language,
+            start_line=flow.line, end_line=flow.line,
+        ))
+    return out

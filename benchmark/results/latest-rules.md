@@ -1,17 +1,17 @@
 # Benchmark SecuScan — règles seules
 
-Exécuté le 16/10/2026 11:08 UTC · 86 failles attendues · tolérance ±2 lignes
+Exécuté le 20/10/2026 09:32 UTC · 111 failles attendues · tolérance ±2 lignes
 
 | Langage | Détectées | Manquées | Faux positifs | Taux de détection | Taux de faux positifs |
 |---|---|---|---|---|---|
-| java | 16 | 0 | 1 | 100 % | 6 % |
-| javascript | 16 | 1 | 0 | 94 % | 0 % |
-| php | 18 | 0 | 1 | 100 % | 5 % |
-| python | 27 | 1 | 2 | 96 % | 7 % |
+| java | 22 | 0 | 1 | 100 % | 4 % |
+| javascript | 22 | 1 | 0 | 96 % | 0 % |
+| php | 23 | 0 | 1 | 100 % | 4 % |
+| python | 35 | 1 | 3 | 97 % | 8 % |
 | typescript | 7 | 0 | 0 | 100 % | 0 % |
-| **Total** | **84** | **2** | **4** | **98 %** | **5 %** |
+| **Total** | **109** | **2** | **5** | **98 %** | **4 %** |
 
-Alertes écartées par la validation IA : 0 · doublons : 0
+Alertes écartées par la validation IA : 0 · doublons : 1
 
 ## Failles manquées
 
@@ -22,5 +22,6 @@ Alertes écartées par la validation IA : 0 · doublons : 0
 
 - `php/account_safe.php:16` PHP-LFI (CWE-98) — Inclusion de fichier dynamique
 - `python/orders_api_safe.py:32` PY-SQLI (CWE-89) — Injection SQL
+- `python/flows_api_safe.py:36` BANDIT-B108 (CWE-377) — Hardcoded tmp directory
 - `backend-python/app.py:42` PY-SQLI (CWE-89) — Injection SQL
 - `billing-java/src/main/java/com/acme/billing/InvoiceService.java:47` JAVA-WEAKHASH (CWE-328) — Algorithme de hachage faible

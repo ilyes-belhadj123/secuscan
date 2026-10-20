@@ -1,0 +1,81 @@
+# SecuScan en ligne : API + worker d'analyses + conteneur d'analyse isolé + Caddy (HTTPS automatique).
+# Prérequis : un nom de domaine pointant vers le serveur, ports 80 et 443 ouverts.
+# Lancement :  SECUSCAN_DOMAIN=secuscan.example.com docker compose up -d --build
+# Voir docs/deploiement.md.
+
+x-app: &app
+  build: .
+  image: secuscan
+  restart: unless-stopped
+  # Secrets (clé OpenRouter, SMTP, OAuth, Stripe…) : fichier lu au démarrage, jamais dans l'image
+  env_file:
+    - path: secuscan.env
+      required: false
+  environment: &app-env
+    SECUSCAN_PUBLIC_URL: https://${SECUSCAN_DOMAIN:?indiquer SECUSCAN_DOMAIN}
+    SECUSCAN_QUEUE: worker        # SS-1 : les analyses tournent dans le service « worker »
+    SECUSCAN_SANDBOX: container   # SS-4 : lecture du code dans le service « sandbox », sans réseau
+  volumes:
+    - secuscan-data:/data         # base, cache IA, logos, réglages
+    - secuscan-work:/data/work    # code importé en cours d'analyse (partagé avec « sandbox »)
+
+services:
+  secuscan:
+    <<: *app
+    environment:
+      <<: *app-env
+      # Caddy est le seul à joindre l'API : ses en-têtes X-Forwarded-For sont fiables
+      FORWARDED_ALLOW_IPS: "*"
+    expose:
+      - "8000"
+
+  worker:
+    <<: *app
+    command: ["python", "-m", "secuscan.worker"]
+    healthcheck:
+      disable: true
+    # Pour plus d'analyses en parallèle : docker compose up -d --scale worker=3
+
+  # Analyse statique isolée : aucun réseau, aucun secret, système de fichiers en lecture seule,
+  # aucun privilège ; ne voit que le dossier des analyses (pas la base de données)
+  sandbox:
+    image: secuscan
+    restart: unless-stopped
+    depends_on: [secuscan]
+    command: ["python", "-m", "secuscan.sandbox", "serve", "/data/work/.sandbox",
+              "--allow", "/data/work", "--allow", "/app/demo"]
+    network_mode: none
+    read_only: true
+    cap_drop: [ALL]
+    security_opt: ["no-new-privileges:true"]
+    mem_limit: 2g
+    pids_limit: 256
+    tmpfs:
+      - /tmp:size=256m
+    environment:
+      SECUSCAN_PRODUCTION: "false"
+    volumes:
+      - secuscan-work:/data/work
+    healthcheck:
+      disable: true
+
+  caddy:
+    image: caddy:2
+    restart: unless-stopped
+    depends_on: [secuscan]
+    environment:
+      SECUSCAN_DOMAIN: ${SECUSCAN_DOMAIN}
+    ports:
+      - "80:80"
+      - "443:443"
+      - "443:443/udp"
+    volumes:
+      - ./deploy/Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy-data:/data
+      - caddy-config:/config
+
+volumes:
+  secuscan-data:
+  secuscan-work:
+  caddy-data:
+  caddy-config:

@@ -6,10 +6,11 @@ sans révéler son existence.
 """
 import logging
 import re
+from contextlib import asynccontextmanager
 from pathlib import Path
 
 from fastapi import Depends, FastAPI, File, Form, HTTPException, Query, Request, UploadFile
-from fastapi.responses import JSONResponse, Response
+from fastapi.responses import FileResponse, JSONResponse, Response
 
 from .accounts import router as accounts_router
 from .ai_settings import router as ai_settings_router
@@ -25,25 +26,39 @@ from .gitproviders import router as git_router
 from .ingest import (
     UploadError,
     Workspace,
-    clone_repository,
     language_for_filename,
     safe_extract_zip,
     validate_git_url,
 )
 from .models import SEVERITY_ORDER, DismissRequest, Finding, GitRequest, Scan, SnippetRequest
-from .pipeline import ScanService, new_id
+from .pipeline import CloneSpec, ScanService, new_id
 from .plans import QuotaExceeded, has_feature
 from .reports import build_json, build_pdf, report_json_schema
+from .stripe_billing import router as stripe_router
+from .training import router as training_router
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s: %(message)s")
 
-app = FastAPI(title="SecuScan API", version="0.2.0")
+
+
+@asynccontextmanager
+async def lifespan(_app: FastAPI):
+    """En production, refuse de démarrer avec une configuration dangereuse (HTTP, cookie non sécurisé…)."""
+    settings = get_service().settings
+    if settings.secuscan_production and (problems := settings.production_problems()):
+        raise RuntimeError("Configuration de production incomplète : " + " ; ".join(problems))
+    yield
+
+
+app = FastAPI(title="SecuScan API", version="0.2.0", lifespan=lifespan)
 app.include_router(accounts_router)
 app.include_router(billing_router)
 app.include_router(git_router)
 app.include_router(beta_router)
 app.include_router(ai_settings_router)
 app.include_router(branding_router)
+app.include_router(training_router)
+app.include_router(stripe_router)
 
 _UNSAFE_METHODS = {"POST", "PUT", "PATCH", "DELETE"}
 
@@ -56,10 +71,27 @@ async def csrf_origin_check(request: Request, call_next):
     """
     if request.method in _UNSAFE_METHODS:
         origin = request.headers.get("origin")
-        allowed = get_settings().secuscan_allowed_origins
+        allowed = get_service().settings.origins
         if (origin and origin not in allowed) or (not origin and request.headers.get("sec-fetch-site") == "cross-site"):
             return JSONResponse({"detail": "Origine de la requête non autorisée"}, status_code=403)
     return await call_next(request)
+
+
+# Politique de contenu de l'interface : scripts du site uniquement (les styles en ligne viennent de React)
+_CSP = ("default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; "
+        "connect-src 'self'; frame-ancestors 'none'; base-uri 'self'; form-action 'self'; object-src 'none'")
+
+
+@app.middleware("http")
+async def security_headers(request: Request, call_next):
+    response = await call_next(request)
+    response.headers.setdefault("X-Content-Type-Options", "nosniff")
+    response.headers.setdefault("X-Frame-Options", "DENY")
+    response.headers.setdefault("Referrer-Policy", "strict-origin-when-cross-origin")
+    response.headers.setdefault("Content-Security-Policy", _CSP)
+    if get_service().settings.secuscan_cookie_secure:  # servi en HTTPS : le navigateur s'y tient ensuite
+        response.headers.setdefault("Strict-Transport-Security", "max-age=31536000; includeSubDomains")
+    return response
 
 
 def _scan_or_404(service: ScanService, scan_id: str, ctx: Context) -> Scan:
@@ -133,7 +165,7 @@ async def scan_upload(
         raise HTTPException(400, "Seules les archives .zip sont acceptées.")
     # Quotas vérifiés avant de recevoir l'archive
     scan = _new_scan(service, ctx, project_name=project_name.strip() or "Projet importé", source="upload")
-    workspace = Workspace(settings.data_dir / "work")
+    workspace = Workspace(settings.work_dir)
     try:
         archive = workspace.path / "upload.zip"
         size = 0
@@ -181,13 +213,9 @@ def scan_git(body: GitRequest, ctx: Context = Depends(current_context), service:
         service, ctx, project_name=(body.project_name or "").strip() or repo_name, source="git",
         source_url=url + (f"@{branch}" if branch else ""),
     )
-    workspace = Workspace(service.settings.data_dir / "work")
+    workspace = Workspace(service.settings.work_dir)
     source_dir = workspace.path / "src"
-    service.submit(
-        scan, source_dir, workspace,
-        prepare=("Clonage du dépôt",
-                 lambda: clone_repository(url, branch, source_dir, service.settings, auth_header=auth_header)),
-    )
+    service.submit(scan, source_dir, workspace, clone=CloneSpec(url, branch, auth_header))
     return scan
 
 
@@ -199,7 +227,7 @@ def scan_snippet(body: SnippetRequest, ctx: Context = Depends(current_context), 
     if not body.code.strip():
         raise HTTPException(400, "Le code est vide.")
     scan = _new_scan(service, ctx, project_name=body.project_name.strip() or "Extrait de code", source="snippet")
-    workspace = Workspace(service.settings.data_dir / "work")
+    workspace = Workspace(service.settings.work_dir)
     (workspace.path / filename).write_text(body.code, encoding="utf-8")
     service.submit(scan, workspace.path, workspace)
     return scan
@@ -332,3 +360,22 @@ def report_json(scan_id: str, ctx: Context = Depends(current_context), service: 
 @app.get("/api/schemas/report-v1.json")
 def report_schema():
     return report_json_schema()
+
+
+# ---------------------------------------------------------------------- interface compilée (mise en ligne)
+# Déclarée en dernier : toute route /api/... déjà définie est prioritaire.
+@app.get("/{path:path}", include_in_schema=False)
+def web_app(path: str, service: ScanService = Depends(get_service)):
+    """Fichiers de l'interface (apps/web/dist) ; toute autre adresse renvoie index.html (routage React)."""
+    if path == "api" or path.startswith("api/"):
+        raise HTTPException(404, "Ressource introuvable")
+    dist = service.settings.secuscan_web_dist.resolve()
+    index = dist / "index.html"
+    if not index.is_file():
+        raise HTTPException(404, "Interface non compilée (npm run build)")
+    target = (dist / path).resolve()
+    if path and target.is_file() and target.is_relative_to(dist):
+        # Fichiers de assets/ nommés d'après leur contenu : mis en cache sans limite
+        cache = "public, max-age=31536000, immutable" if path.startswith("assets/") else "no-cache"
+        return FileResponse(target, headers={"Cache-Control": cache})
+    return FileResponse(index, headers={"Cache-Control": "no-cache"})

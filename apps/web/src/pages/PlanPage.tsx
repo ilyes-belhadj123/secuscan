@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useState } from "react";
-import { Link } from "react-router-dom";
+import { Link, useSearchParams } from "react-router-dom";
 import { api, type Billing, type PlanId, type PlanOffer } from "../api";
 import { formatDate } from "../labels";
 import { useSession } from "../session";
@@ -68,17 +68,53 @@ export default function PlanPage() {
   const [notice, setNotice] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
 
+  const [params, setParams] = useSearchParams();
+
   const load = useCallback(() => {
     api.billing().then(setBilling).catch((e) => setError((e as Error).message));
   }, []);
   useEffect(load, [load]);
+
+  // Retour de la page de paiement Stripe : l'offre est activée par l'événement signé de Stripe,
+  // qui arrive en général quelques secondes après ; on recharge la page en attendant
+  useEffect(() => {
+    const payment = params.get("paiement");
+    if (!payment) return;
+    setParams({}, { replace: true });
+    if (payment === "annule") {
+      setNotice("Paiement annulé : votre offre n'a pas changé.");
+      return;
+    }
+    setNotice("Paiement reçu : votre nouvelle offre est activée dès la confirmation de Stripe (quelques secondes).");
+    let tries = 0;
+    const timer = setInterval(() => {
+      load();
+      refresh();
+      if (++tries >= 5) clearInterval(timer);
+    }, 2000);
+    return () => clearInterval(timer);
+  }, [params, setParams, load, refresh]);
+
+  async function openPortal() {
+    setBusy(true);
+    try {
+      window.location.assign((await api.billingPortal()).url);
+    } catch (e) {
+      setError((e as Error).message);
+      setBusy(false);
+    }
+  }
 
   async function select(plan: PlanId) {
     setBusy(true);
     setError(null);
     setNotice(null);
     try {
-      const { invoice } = await api.selectPlan(plan);
+      const { invoice, checkout_url } = await api.selectPlan(plan);
+      if (checkout_url) {
+        window.location.assign(checkout_url); // page de paiement sécurisée de Stripe
+        return;
+      }
       setNotice(invoice ? `Offre modifiée. Facture ${invoice.number} émise (${eur(invoice.amount_eur)} HT).` : "Offre modifiée.");
       await refresh();
       load();
@@ -104,6 +140,12 @@ export default function PlanPage() {
         </p>
       </div>
 
+      {billing.provider === "stripe" && billing.can_manage && billing.has_subscription && (
+        <div className="row" style={{ justifyContent: "space-between" }}>
+          <span className="small secondary">Paiement sécurisé par Stripe · facturation mensuelle par membre</span>
+          <button className="btn" disabled={busy} onClick={openPortal}>Gérer le paiement et les factures</button>
+        </div>
+      )}
       {billing.provider === "demo" && (
         <div className="warning-box">
           <strong>Mode démo</strong> : aucun paiement n'est encaissé. Un changement d'offre est appliqué immédiatement et

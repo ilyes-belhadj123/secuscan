@@ -1,5 +1,7 @@
 from functools import lru_cache
 from pathlib import Path
+from typing import Literal
+from urllib.parse import urlsplit
 
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
@@ -16,9 +18,12 @@ PLAN_AI_BUDGETS = {
 }
 
 
+DEFAULT_ENV_FILES = (REPO_ROOT / ".env", API_ROOT / ".env")
+
+
 class Settings(BaseSettings):
     model_config = SettingsConfigDict(
-        env_file=(REPO_ROOT / ".env", API_ROOT / ".env"),
+        env_file=DEFAULT_ENV_FILES,
         env_file_encoding="utf-8",
         extra="ignore",
     )
@@ -57,8 +62,20 @@ class Settings(BaseSettings):
     secuscan_smtp_password: str = ""
     secuscan_smtp_starttls: bool = True
     secuscan_smtp_from: str = "SecuScan <no-reply@example.com>"
-    # Origines autorisées pour les requêtes qui modifient des données (protection CSRF)
+    # Origines autorisées pour les requêtes qui modifient des données (protection CSRF) ;
+    # l'origine de SECUSCAN_PUBLIC_URL est toujours ajoutée
     secuscan_allowed_origins: list[str] = ["http://127.0.0.1:5173", "http://localhost:5173"]
+
+    # SS-1 : « thread » = analyses dans le processus de l'API ; « worker » = file durable en base,
+    # exécutée par un ou plusieurs processus `python -m secuscan.worker`
+    secuscan_queue: Literal["thread", "worker"] = "thread"
+    # SS-4 : isolation de l'analyse statique (voir sandbox.py) : inline | process | container
+    secuscan_sandbox: Literal["inline", "process", "container"] = "inline"
+
+    # Mise en ligne : l'API sert aussi l'interface compilée (un seul service à héberger)
+    secuscan_web_dist: Path = REPO_ROOT / "apps" / "web" / "dist"
+    # true = configuration de production vérifiée au démarrage (HTTPS, cookie sécurisé…)
+    secuscan_production: bool = False
 
     # Connexion GitHub / GitLab (SS-17) : identifiants des applications OAuth et clé de chiffrement
     secuscan_github_client_id: str = ""
@@ -80,6 +97,18 @@ class Settings(BaseSettings):
     secuscan_price_business_eur: float = 79.0
     # Secret partagé avec le prestataire de paiement pour signer les webhooks (vide : webhook désactivé)
     secuscan_billing_webhook_secret: str = ""
+    # Stripe (paiement réel) : clé secrète (sk_test_… en test), secret de signature du webhook (whsec_…)
+    # et identifiants des tarifs récurrents par membre créés dans le tableau de bord Stripe (price_…)
+    secuscan_stripe_secret_key: str = ""
+    secuscan_stripe_webhook_secret: str = ""
+    secuscan_stripe_price_pro: str = ""
+    secuscan_stripe_price_business: str = ""
+    secuscan_stripe_api_url: str = "https://api.stripe.com/v1"
+
+    @property
+    def stripe_enabled(self) -> bool:
+        return bool(self.secuscan_stripe_secret_key and self.secuscan_stripe_price_pro
+                    and self.secuscan_stripe_price_business)
 
     # Maîtrise des coûts IA (SS-12)
     # Offre par défaut des analyses sans organisation (outils internes : benchmark, préparation démo)
@@ -112,8 +141,40 @@ class Settings(BaseSettings):
     max_file_bytes: int = 1024 * 1024
 
     @property
+    def origins(self) -> set[str]:
+        """Origines autorisées : la liste configurée et celle de l'adresse publique."""
+        public = urlsplit(self.secuscan_public_url)
+        return set(self.secuscan_allowed_origins) | {f"{public.scheme}://{public.netloc}"}
+
+    def production_problems(self) -> list[str]:
+        """Réglages incompatibles avec une mise en ligne (bloquants si SECUSCAN_PRODUCTION=true)."""
+        problems = []
+        if urlsplit(self.secuscan_public_url).scheme != "https":
+            problems.append("SECUSCAN_PUBLIC_URL doit être une adresse https://")
+        if not self.secuscan_cookie_secure:
+            problems.append("SECUSCAN_COOKIE_SECURE doit valoir true (cookie de session réservé au HTTPS)")
+        if (self.secuscan_github_client_id or self.secuscan_gitlab_client_id) and not self.secuscan_token_key:
+            problems.append("SECUSCAN_TOKEN_KEY est requise pour chiffrer les jetons GitHub / GitLab")
+        if not (self.secuscan_web_dist / "index.html").is_file():
+            problems.append(f"interface compilée absente ({self.secuscan_web_dist}) : lancer npm run build")
+        return problems
+
+    @property
     def ai_enabled(self) -> bool:
         return bool(self.openrouter_api_key) and not self.secuscan_ai_disabled
+
+    @property
+    def work_dir(self) -> Path:
+        """Code importé en cours d'analyse (partagé avec le conteneur isolé en mode « container »)."""
+        path = self.data_dir / "work"
+        path.mkdir(parents=True, exist_ok=True)
+        return path
+
+    @property
+    def sandbox_dir(self) -> Path:
+        path = self.work_dir / ".sandbox"
+        path.mkdir(parents=True, exist_ok=True)
+        return path
 
     @property
     def data_dir(self) -> Path:
@@ -126,4 +187,10 @@ class Settings(BaseSettings):
 
 @lru_cache
 def get_settings() -> Settings:
-    return Settings()
+    settings = Settings()
+    # Fichier écrit par l'écran « Paramètres » placé ailleurs (ex. volume de données d'un conteneur) :
+    # il est relu au démarrage, après les fichiers par défaut
+    extra = settings.secuscan_env_file
+    if extra.is_file() and extra.resolve() not in {p.resolve() for p in DEFAULT_ENV_FILES}:
+        settings = Settings(_env_file=(*DEFAULT_ENV_FILES, extra))
+    return settings

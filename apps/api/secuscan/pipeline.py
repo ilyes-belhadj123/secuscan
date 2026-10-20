@@ -1,23 +1,22 @@
 """Pipeline d'analyse : collecte → secrets → règles → dépendances → IA → scoring → stockage."""
-import hashlib
 import logging
 import re
 import time
-import uuid
-from collections.abc import Callable
 from concurrent.futures import ThreadPoolExecutor, as_completed
+from dataclasses import dataclass
 from pathlib import Path
 
 from .ai.enricher import BATCH_SIZE, AIBudget, AIUnavailable, BudgetExceeded, Enricher
-from .analyzers import external, sast, sca, secrets
+from .analyzers import sca
 from .analyzers.context import enclosing_excerpt, file_header
-from .analyzers.rules import RULES_BY_ID
 from .config import Settings
-from .ingest import MANIFEST_FILES, CodeBase, SourceFile, Workspace, collect_codebase
-from .models import SEVERITY_ORDER, DependencyInfo, Finding, Scan, SecretInfo, Severity, now_iso
+from .ingest import MANIFEST_FILES, SourceFile, Workspace, clone_repository, remove_tree
+from .models import SEVERITY_ORDER, DependencyInfo, Finding, Scan, Severity, now_iso
+from .sandbox import _fingerprint, _normalize, new_id, static_analysis
 from .scoring import apply_severity, project_score
 from .storage import Storage
 from .taxonomy import CWE_DEPENDENCY, owasp_for
+from .tokenbox import encrypt
 
 log = logging.getLogger(__name__)
 
@@ -54,16 +53,17 @@ def _inline_suppression(finding: Finding, source: SourceFile | None) -> str | No
     return None
 
 
-def new_id() -> str:
-    return uuid.uuid4().hex[:12]
+@dataclass
+class CloneSpec:
+    """Dépôt à cloner avant l'analyse (étape préalable, dans le worker qui exécute l'analyse)."""
+    url: str
+    branch: str | None = None
+    auth_header: str | None = None  # dépôt privé : jamais stocké en clair (chiffré dans la file)
 
 
-def _fingerprint(*parts: str) -> str:
-    return hashlib.sha256("|".join(parts).encode()).hexdigest()[:16]
-
-
-def _normalize(line: str) -> str:
-    return re.sub(r"\s+", " ", line).strip()
+def job_aad(scan_id: str) -> str:
+    """Données associées du chiffrement de l'accès Git : liées à une analyse précise."""
+    return f"job:{scan_id}"
 
 
 class ScanService:
@@ -73,25 +73,30 @@ class ScanService:
         self.executor = ThreadPoolExecutor(max_workers=2, thread_name_prefix="scan")
 
     # ------------------------------------------------------------------ API publique
-    def submit(
-        self, scan: Scan, root: Path, workspace: Workspace | None = None,
-        prepare: tuple[str, Callable[[], None]] | None = None,
-    ) -> None:
-        """Lance l'analyse en tâche de fond. `prepare` = (libellé, étape préalable), ex. clonage Git."""
+    def submit(self, scan: Scan, root: Path, workspace: Workspace | None = None, clone: CloneSpec | None = None) -> None:
+        """Lance l'analyse : dans un fil du processus, ou dans la file durable des workers (SS-1)."""
         self.storage.save_scan(scan)
         self._audit(scan, "scan.created", {"project": scan.project_name, "source": scan.source})
-        self.executor.submit(self._run_safely, scan, root, workspace, prepare)
+        if self.settings.secuscan_queue == "thread":
+            self.executor.submit(self._run_safely, scan, root, workspace, clone)
+            return
+        payload: dict = {"root": str(root), "workspace": str(workspace.path) if workspace else None}
+        if clone:
+            auth = (encrypt(clone.auth_header, self.settings.secuscan_token_key, job_aad(scan.id))
+                    if clone.auth_header else "")
+            payload["clone"] = {"url": clone.url, "branch": clone.branch, "auth": auth}
+        self.storage.enqueue_job(scan.id, payload)
 
     def _audit(self, scan: Scan, action: str, details: dict) -> None:
         self.storage.audit(action, scan.id, details, org_id=scan.org_id or "", actor=scan.created_by or "")
 
-    def _run_safely(self, scan: Scan, root: Path, workspace: Workspace | None, prepare=None) -> None:
+    def _run_safely(self, scan: Scan, root: Path, workspace: Workspace | None, clone: CloneSpec | None = None) -> None:
         try:
-            if prepare:
-                label, step = prepare
+            if clone:
                 scan.status = "running"
-                self._progress(scan, label, 0.02)
-                step()
+                self._progress(scan, "Clonage du dépôt", 0.02)
+                remove_tree(root)  # reprise après l'arrêt d'un worker : clone partiel éventuel
+                clone_repository(clone.url, clone.branch, root, self.settings, auth_header=clone.auth_header)
             self.run(scan, root)
         except Exception as exc:  # noqa: BLE001 — l'erreur est remontée à l'utilisateur
             log.exception("Analyse %s échouée", scan.id)
@@ -112,25 +117,22 @@ class ScanService:
         scan.status = "running"
         scan.ai_enabled = self.settings.ai_enabled
         self._progress(scan, "Lecture du code et détection des langages", 0.05)
-        codebase = collect_codebase(root, self.settings, exclude)
-        scan.summary.files_scanned = len(codebase.files) + len(codebase.manifests)
-        scan.summary.lines_scanned = codebase.line_count
-        scan.summary.languages = codebase.languages
-        if codebase.vendored:
-            examples = ", ".join(codebase.vendored[:3]) + ("…" if len(codebase.vendored) > 3 else "")
+        # Seule étape qui lit le code importé : isolable (SS-4), sans réseau ni secret
+        static = static_analysis(root, self.settings, scan.id, exclude,
+                                 progress=lambda stage, value: self._progress(scan, stage, value))
+        scan.summary.files_scanned = static.files_scanned
+        scan.summary.lines_scanned = static.lines_scanned
+        scan.summary.languages = static.languages
+        if static.vendored:
+            examples = ", ".join(static.vendored[:3]) + ("…" if len(static.vendored) > 3 else "")
             scan.summary.warnings.append(
-                f"{len(codebase.vendored)} fichier(s) de bibliothèques tierces ou minifiés non analysés ({examples}) : "
+                f"{len(static.vendored)} fichier(s) de bibliothèques tierces ou minifiés non analysés ({examples}) : "
                 "préférez les déclarer comme dépendances (package.json) pour qu'elles soient vérifiées."
             )
-
-        self._progress(scan, "Détection des secrets", 0.15)
-        findings, redacted = self._secrets(scan, codebase)
-
-        self._progress(scan, "Analyse statique (règles)", 0.3)
-        findings += self._sast(scan, redacted, root, findings)
+        findings, redacted = static.findings, static.redacted
 
         self._progress(scan, "Analyse des dépendances", 0.35)
-        findings += self._dependencies(scan, codebase, redacted)
+        findings += self._dependencies(scan, static.dependencies, redacted)
 
         enricher = Enricher(self.settings, self.storage, AIBudget(*self.settings.ai_budget_for(self._plan(scan))))
         findings += self._logic(scan, findings, redacted, enricher)
@@ -153,85 +155,7 @@ class ScanService:
                     {"project": scan.project_name, "findings": scan.summary.total, "score": scan.score})
         return findings
 
-    def _secrets(self, scan: Scan, codebase: CodeBase):
-        findings: list[Finding] = []
-        redacted_files = {}
-        # Les manifests peuvent aussi contenir des jetons (ex. registres privés)
-        manifests = [SourceFile(m.path, MANIFEST_FILES[m.name], m.content) for m in codebase.manifests]
-        for source in codebase.files + manifests:
-            matches = secrets.find_secrets(source)
-            clean = secrets.redact(source, matches)
-            redacted_files[source.path] = clean
-            lines = clean.content.split("\n")
-            for m in matches:
-                top = max(1, m.line - 3)
-                bottom = min(len(lines), m.line + 3)
-                findings.append(
-                    Finding(
-                        id=new_id(), scan_id=scan.id, kind="secret", rule_id=m.pattern.id,
-                        title=f"Secret exposé : {m.pattern.label}",
-                        message="Un secret est écrit en clair dans le code source : toute personne ayant "
-                                "accès au dépôt (ou à son historique) peut l'utiliser.",
-                        fix_hint="Révoquer le secret, le déplacer dans une variable d'environnement ou un "
-                                 "coffre-fort de secrets, puis purger l'historique Git.",
-                        language=source.language, file=source.path,
-                        start_line=m.line, end_line=m.line,
-                        snippet="\n".join(lines[top - 1 : bottom]), snippet_start_line=top,
-                        cwe="CWE-798", owasp=owasp_for("CWE-798"),
-                        raw_severity=m.pattern.severity, severity=m.pattern.severity,
-                        fingerprint=_fingerprint(m.pattern.id, source.path, m.fingerprint),
-                        secret=SecretInfo(secret_type=m.pattern.label, masked=m.masked, fingerprint=m.fingerprint),
-                    )
-                )
-        return findings, redacted_files
-
-    def _sast(self, scan: Scan, redacted: dict, root: Path, existing: list[Finding]) -> list[Finding]:
-        code_files = {p: s for p, s in redacted.items() if p.split("/")[-1] not in MANIFEST_FILES}
-        raws = [raw for source in code_files.values() for raw in sast.analyze_file(source)]
-        # Moteurs externes (SS-5) : une ligne déjà signalée (règle maison ou secret) n'est pas dupliquée
-        flagged = {(f.file, f.start_line) for f in existing} | {(r.file, r.start_line) for r in raws}
-        external = self._external_engines(root, code_files)
-        raws += [r for r in external if (r.file, r.start_line) not in flagged]
-
-        findings = []
-        seen = set()
-        for raw in raws:
-            # Deux règles qui signalent la même faille (même CWE) sur la même ligne : une seule alerte
-            key = (raw.cwe, raw.file, raw.start_line)
-            if key in seen:
-                continue
-            seen.add(key)
-            source = code_files[raw.file]
-            lines = source.content.split("\n")
-            if not 1 <= raw.start_line <= len(lines):
-                continue
-            excerpt = enclosing_excerpt(lines, source.language, raw.start_line, min(raw.end_line, len(lines)))
-            rule = RULES_BY_ID.get(raw.rule_id)
-            findings.append(
-                Finding(
-                    id=new_id(), scan_id=scan.id, kind="sast", rule_id=raw.rule_id, title=raw.title,
-                    message=raw.message, fix_hint=rule.fix_hint if rule else None, language=raw.language,
-                    file=raw.file, start_line=raw.start_line, end_line=min(raw.end_line, len(lines)),
-                    snippet=excerpt.code, snippet_start_line=excerpt.start_line,
-                    cwe=raw.cwe, owasp=owasp_for(raw.cwe),
-                    raw_severity=raw.severity, severity=raw.severity,
-                    fingerprint=_fingerprint(raw.rule_id, raw.file, _normalize(lines[raw.start_line - 1])),
-                )
-            )
-        return findings
-
-    def _external_engines(self, root: Path, code_files: dict) -> list:
-        engines = self.settings.secuscan_external_engines
-        results = []
-        if "bandit" in engines:
-            results += external.run_bandit(root, [p for p, s in code_files.items() if s.language == "python"])
-        if "opengrep" in engines:
-            results += external.run_opengrep(root, self.settings.secuscan_opengrep_rules,
-                                             {p: s.language for p, s in code_files.items()})
-        return results
-
-    def _dependencies(self, scan: Scan, codebase: CodeBase, redacted: dict) -> list[Finding]:
-        deps = sca.parse_manifests(codebase.manifests)
+    def _dependencies(self, scan: Scan, deps: list[sca.Dependency], redacted: dict) -> list[Finding]:
         if not deps:
             return []
         client = sca.OSVClient(self.storage, offline=self.settings.secuscan_offline)

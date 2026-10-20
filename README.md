@@ -17,6 +17,8 @@ powershell -ExecutionPolicy Bypass -File start-demo.ps1
 
 L'interface s'ouvre sur http://127.0.0.1:5173 (API sur le port 8001).
 
+**Mise en ligne** (HTTPS, un seul service Docker + Caddy) : voir [docs/deploiement.md](docs/deploiement.md).
+
 **Premier lancement** : créez votre compte et votre organisation (« Créer une organisation »). La
 première organisation créée récupère les analyses faites avant l'arrivée des comptes. Invitez
 ensuite votre équipe depuis « Équipe » (lien d'invitation à transmettre, valable 7 jours).

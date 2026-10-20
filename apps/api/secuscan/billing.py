@@ -1,9 +1,9 @@
 """SS-20 — offres, quotas et facturation.
 
-Mode démo : aucun prestataire de paiement n'est branché. Un changement d'offre est appliqué
-immédiatement et produit une facture pro forma (aucun paiement réel). Le point d'entrée
-`/api/billing/webhook` (signature HMAC-SHA256) permet de brancher un prestataire (Stripe, Paddle…) :
-c'est lui qui confirmera alors les changements d'offre après paiement.
+Trois modes :
+- Stripe (variables SECUSCAN_STRIPE_*) : paiement réel, voir stripe_billing.py ;
+- webhook générique signé HMAC-SHA256 (`/api/billing/webhook`) pour un autre prestataire ;
+- démo (par défaut) : changement d'offre immédiat et facture pro forma, sans paiement.
 """
 import hashlib
 import hmac
@@ -65,10 +65,8 @@ def check_member_quota(storage: Storage, org_id: str) -> None:
         )
 
 
-def change_plan(service: ScanService, org_id: str, new_plan: str, actor: str, provider: str = DEMO_PROVIDER) -> dict | None:
-    """Applique une nouvelle offre après vérification que l'usage actuel y tient. Renvoie la facture émise."""
-    storage = service.storage
-    org = storage.get_org(org_id)
+def ensure_fits(storage: Storage, org_id: str, new_plan: str) -> None:
+    """QuotaExceeded si l'usage actuel de l'organisation dépasse les limites de l'offre visée."""
     plan = get_plan(new_plan)
     u = usage(storage, org_id)
     if plan.members is not None and u["members"] > plan.members:
@@ -76,17 +74,29 @@ def change_plan(service: ScanService, org_id: str, new_plan: str, actor: str, pr
             f"L'offre {plan.name} est limitée à {plan.members} membres : retirez d'abord "
             f"{u['members'] - plan.members} membre(s)."
         )
+
+
+def change_plan(service: ScanService, org_id: str, new_plan: str, actor: str, provider: str = DEMO_PROVIDER,
+                invoice: bool = True) -> dict | None:
+    """Applique une nouvelle offre après vérification que l'usage actuel y tient. Renvoie la facture émise.
+
+    `invoice=False` : la facture est émise par le prestataire (Stripe), pas par SecuScan.
+    """
+    storage = service.storage
+    org = storage.get_org(org_id)
+    ensure_fits(storage, org_id, new_plan)
+    u = usage(storage, org_id)
     previous = org["plan"]
     storage.set_org_plan(org_id, new_plan)
-    invoice = None
+    created = None
     price = service.settings.price_per_member(new_plan)
-    if price > 0:
+    if invoice and price > 0:
         period = datetime.now(UTC).strftime("%Y-%m")
         status = "pro forma (mode démo)" if provider == DEMO_PROVIDER else "payée"
-        invoice = storage.create_invoice(org_id, period, new_plan, max(1, u["members"]), price, status, provider)
+        created = storage.create_invoice(org_id, period, new_plan, max(1, u["members"]), price, status, provider)
     storage.audit("billing.plan_changed", org_id, {"from": previous, "to": new_plan, "provider": provider},
                   org_id=org_id, actor=actor)
-    return invoice
+    return created
 
 
 def verify_signature(secret: str, body: bytes, header: str | None) -> bool:
@@ -130,7 +140,9 @@ def billing(ctx: Context = Depends(current_context), service: ScanService = Depe
         "monthly_estimate_eur": round(price * max(1, u["members"]), 2) if price else 0.0,
         "catalog": _catalog(service),
         "invoices": storage.list_invoices(ctx.org_id) if ctx.is_admin else [],
-        "provider": "webhook" if service.settings.secuscan_billing_webhook_secret else "demo",
+        "provider": ("stripe" if service.settings.stripe_enabled
+                     else "webhook" if service.settings.secuscan_billing_webhook_secret else "demo"),
+        "has_subscription": bool(storage.stripe_ids(ctx.org_id)[1]),
         "can_manage": ctx.role == "owner",
     }
 
@@ -140,6 +152,9 @@ def select_plan(body: PlanRequest, ctx: Context = Depends(current_context), serv
     if ctx.role != "owner":
         raise HTTPException(403, "Seul le propriétaire de l'organisation peut changer d'offre.")
     try:
+        if service.settings.stripe_enabled:
+            from .stripe_billing import request_plan_change  # import local : stripe_billing dépend de ce module
+            return request_plan_change(service, ctx, body.plan)
         invoice = change_plan(service, ctx.org_id, body.plan, ctx.email)
     except QuotaExceeded as exc:
         raise HTTPException(409, str(exc)) from exc

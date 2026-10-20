@@ -5,5 +5,7 @@ exclude:
   - benchmark/                              # corpus volontairement vulnérable (benchmark)
   - apps/api/tests/                         # cas de test contenant du code vulnérable
   - apps/api/secuscan/analyzers/rules.py    # définitions des règles : motifs et descriptions, pas du code exécuté
+  - apps/api/secuscan/analyzers/rules_extra.py  # idem : règles complémentaires
+  - apps/api/secuscan/training_exercises.py # mode formation : code vulnérable à corriger, volontaire
   - apps/web/dist/                          # build généré
   - docs/

@@ -154,6 +154,30 @@ CREATE TABLE IF NOT EXISTS password_resets (
     used_at TEXT,
     created_at TEXT NOT NULL
 );
+CREATE TABLE IF NOT EXISTS training_attempts (
+    org_id TEXT NOT NULL,
+    user_id TEXT NOT NULL,
+    exercise_id TEXT NOT NULL,
+    passed INTEGER NOT NULL,
+    code TEXT NOT NULL,
+    created_at TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_training_user ON training_attempts(org_id, user_id, exercise_id);
+CREATE TABLE IF NOT EXISTS jobs (
+    id TEXT PRIMARY KEY,
+    scan_id TEXT NOT NULL,
+    payload TEXT NOT NULL,
+    status TEXT NOT NULL,
+    attempts INTEGER NOT NULL DEFAULT 0,
+    worker TEXT NOT NULL DEFAULT '',
+    heartbeat REAL NOT NULL DEFAULT 0,
+    created_at TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_jobs_status ON jobs(status, created_at);
+CREATE TABLE IF NOT EXISTS stripe_events (
+    id TEXT PRIMARY KEY,
+    received_at TEXT NOT NULL
+);
 CREATE TABLE IF NOT EXISTS org_logos (
     org_id TEXT PRIMARY KEY,
     png BLOB NOT NULL,
@@ -172,7 +196,9 @@ CREATE TABLE IF NOT EXISTS sessions (
 _ADDED_COLUMNS = {
     "scans": [("org_id", "TEXT NOT NULL DEFAULT ''")],
     "audit_logs": [("org_id", "TEXT NOT NULL DEFAULT ''"), ("actor", "TEXT NOT NULL DEFAULT ''")],
-    "organizations": [("plan", "TEXT NOT NULL DEFAULT 'free'")],
+    "organizations": [("plan", "TEXT NOT NULL DEFAULT 'free'"),
+                      ("stripe_customer_id", "TEXT NOT NULL DEFAULT ''"),
+                      ("stripe_subscription_id", "TEXT NOT NULL DEFAULT ''")],
 }
 
 
@@ -429,6 +455,97 @@ class Storage:
                 f"SELECT {', '.join(keys)} FROM invoices WHERE org_id = ? ORDER BY created_at DESC", (org_id,)
             ).fetchall()
         return [dict(zip(keys, r, strict=True)) for r in rows]
+
+    # --- File de tâches (SS-1) -----------------------------------------
+    def enqueue_job(self, scan_id: str, payload: dict) -> str:
+        job_id = _id()
+        with self._lock, self._conn() as conn:
+            conn.execute("INSERT INTO jobs (id, scan_id, payload, status, created_at) VALUES (?, ?, ?, 'queued', ?)",
+                         (job_id, scan_id, json.dumps(payload), now_iso()))
+        return job_id
+
+    def claim_job(self, worker: str) -> dict | None:
+        """Réserve la plus ancienne tâche en attente ; un seul worker l'obtient, même à plusieurs."""
+        with self._lock, self._conn() as conn:
+            conn.execute("BEGIN IMMEDIATE")
+            row = conn.execute(
+                "SELECT id, scan_id, payload, attempts FROM jobs WHERE status = 'queued' ORDER BY created_at, rowid LIMIT 1"
+            ).fetchone()
+            if not row:
+                return None
+            conn.execute("UPDATE jobs SET status = 'running', worker = ?, heartbeat = ?, attempts = attempts + 1 "
+                         "WHERE id = ?", (worker, time.time(), row[0]))
+        return {"id": row[0], "scan_id": row[1], "payload": json.loads(row[2]), "attempts": row[3] + 1}
+
+    def heartbeat_job(self, job_id: str) -> None:
+        with self._lock, self._conn() as conn:
+            conn.execute("UPDATE jobs SET heartbeat = ? WHERE id = ?", (time.time(), job_id))
+
+    def finish_job(self, job_id: str, status: str) -> None:
+        """Fin de tâche : la charge (accès Git chiffré, chemins) est effacée, seul le statut reste."""
+        with self._lock, self._conn() as conn:
+            conn.execute("UPDATE jobs SET status = ?, payload = '{}' WHERE id = ?", (status, job_id))
+
+    def stale_jobs(self, older_than: float) -> list[dict]:
+        """Tâches « en cours » dont le worker ne donne plus signe de vie (arrêté, planté)."""
+        with self._conn() as conn:
+            rows = conn.execute("SELECT id, scan_id, attempts FROM jobs WHERE status = 'running' AND heartbeat < ?",
+                                (older_than,)).fetchall()
+        return [{"id": r[0], "scan_id": r[1], "attempts": r[2]} for r in rows]
+
+    def requeue_job(self, job_id: str) -> None:
+        with self._lock, self._conn() as conn:
+            conn.execute("UPDATE jobs SET status = 'queued', worker = '' WHERE id = ? AND status = 'running'", (job_id,))
+
+    def count_jobs(self, status: str) -> int:
+        with self._conn() as conn:
+            return conn.execute("SELECT COUNT(*) FROM jobs WHERE status = ?", (status,)).fetchone()[0]
+
+    # --- Stripe (SS-20) ------------------------------------------------
+    def stripe_ids(self, org_id: str) -> tuple[str, str]:
+        """(client Stripe, abonnement Stripe) de l'organisation, chaînes vides si aucun."""
+        with self._conn() as conn:
+            row = conn.execute("SELECT stripe_customer_id, stripe_subscription_id FROM organizations WHERE id = ?",
+                               (org_id,)).fetchone()
+        return (row[0], row[1]) if row else ("", "")
+
+    def set_stripe_ids(self, org_id: str, customer_id: str, subscription_id: str) -> None:
+        with self._lock, self._conn() as conn:
+            conn.execute("UPDATE organizations SET stripe_customer_id = ?, stripe_subscription_id = ? WHERE id = ?",
+                         (customer_id, subscription_id, org_id))
+
+    def first_stripe_event(self, event_id: str) -> bool:
+        """True la première fois qu'un événement est reçu : Stripe peut renvoyer le même plusieurs fois."""
+        with self._lock, self._conn() as conn:
+            return conn.execute("INSERT OR IGNORE INTO stripe_events VALUES (?, ?)", (event_id, now_iso())).rowcount == 1
+
+    # --- Mode formation (SS-24) ----------------------------------------
+    def record_training_attempt(self, org_id: str, user_id: str, exercise_id: str, passed: bool, code: str) -> None:
+        with self._lock, self._conn() as conn:
+            conn.execute("INSERT INTO training_attempts VALUES (?, ?, ?, ?, ?, ?)",
+                         (org_id, user_id, exercise_id, int(passed), code, now_iso()))
+
+    def training_progress(self, org_id: str, user_id: str) -> dict[str, dict]:
+        """Par exercice : réussi au moins une fois, nombre de tentatives, dernier code soumis."""
+        with self._conn() as conn:
+            rows = conn.execute(
+                "SELECT exercise_id, MAX(passed), COUNT(*), "
+                "(SELECT code FROM training_attempts t2 WHERE t2.org_id = t.org_id AND t2.user_id = t.user_id "
+                " AND t2.exercise_id = t.exercise_id ORDER BY created_at DESC, rowid DESC LIMIT 1) "
+                "FROM training_attempts t WHERE org_id = ? AND user_id = ? GROUP BY exercise_id",
+                (org_id, user_id),
+            ).fetchall()
+        return {r[0]: {"passed": bool(r[1]), "attempts": r[2], "last_code": r[3]} for r in rows}
+
+    def training_team_progress(self, org_id: str) -> dict[str, dict]:
+        """Par membre : exercices réussis, tentatives, dernière activité."""
+        with self._conn() as conn:
+            rows = conn.execute(
+                "SELECT user_id, COUNT(DISTINCT CASE WHEN passed = 1 THEN exercise_id END), COUNT(*), MAX(created_at) "
+                "FROM training_attempts WHERE org_id = ? GROUP BY user_id",
+                (org_id,),
+            ).fetchall()
+        return {r[0]: {"passed": r[1], "attempts": r[2], "last_activity": r[3]} for r in rows}
 
     # --- Logo des rapports (SS-18) ---------------------------------------
     def set_org_logo(self, org_id: str, png: bytes) -> None:

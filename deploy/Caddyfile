@@ -1,0 +1,9 @@
+# Certificat HTTPS obtenu et renouvelé automatiquement pour le domaine
+{$SECUSCAN_DOMAIN} {
+	encode zstd gzip
+	# Archives de code jusqu'à 100 Mo (limite de l'application)
+	request_body {
+		max_size 110MB
+	}
+	reverse_proxy secuscan:8000
+}

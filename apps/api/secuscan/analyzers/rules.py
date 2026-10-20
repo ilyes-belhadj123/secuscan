@@ -343,4 +343,38 @@ RULES: list[Rule] = [
     ),
 ]
 
-RULES_BY_ID = {rule.id: rule for rule in RULES}
+# Règles complémentaires (nouvelles familles) et métadonnées des alertes de flux (taint.py)
+from .rules_extra import EXTRA_RULES  # noqa: E402 — rules_extra importe Rule depuis ce module
+
+RULES += EXTRA_RULES
+
+_NEVER = re.compile(r"(?!)")  # les alertes de flux ne viennent pas d'un motif de ligne
+_FLOW_FIX = {
+    "sql": "Utiliser une requête paramétrée : la valeur est passée séparément du texte SQL.",
+    "xss": "Échapper la valeur à l'affichage (htmlspecialchars, escapeHtml, Encode.forHtml) ou utiliser un moteur "
+           "de templates qui échappe par défaut.",
+    "cmd": "Passer les arguments sous forme de liste, sans shell, et valider la valeur (liste blanche).",
+    "ssrf": "N'appeler que des adresses connues : liste blanche de domaines, ou identifiant converti en URL côté "
+            "serveur ; bloquer les adresses internes (127.0.0.1, 169.254.169.254, réseaux privés).",
+    "path": "Ne garder que le nom du fichier (basename) et vérifier que le chemin final reste dans le dossier prévu.",
+    "redirect": "Rediriger vers une liste d'adresses autorisées, ou uniquement vers des chemins relatifs du site.",
+    "lfi": "Choisir le fichier dans une liste blanche (in_array($page, $autorises, true)), jamais d'après la saisie.",
+}
+_FLOW_PREFIXES = {"PY": ("python",), "JS": JS_LANGS, "PHP": ("php",), "JAVA": ("java",)}
+_FLOW_SUFFIXES = {"SQLI-FLOW": "sql", "XSS-FLOW": "xss", "CMDI-FLOW": "cmd", "SSRF": "ssrf",
+                  "PATH-FLOW": "path", "REDIRECT-FLOW": "redirect", "LFI-FLOW": "lfi"}
+_FLOW_META = {
+    "sql": ("Injection SQL", "CWE-89", C), "xss": ("Cross-site scripting (XSS)", "CWE-79", H),
+    "cmd": ("Injection de commande système", "CWE-78", C),
+    "ssrf": ("Falsification de requête côté serveur (SSRF)", "CWE-918", H),
+    "path": ("Traversée de répertoire", "CWE-22", H), "redirect": ("Redirection ouverte", "CWE-601", M),
+    "lfi": ("Inclusion de fichier dynamique", "CWE-98", C),
+}
+FLOW_RULES = [
+    Rule(f"{prefix}-{suffix}", langs, _NEVER, _FLOW_META[kind][0], _FLOW_META[kind][1], _FLOW_META[kind][2],
+         "Une entrée utilisateur est suivie jusqu'à une opération sensible sans être nettoyée.", _FLOW_FIX[kind],
+         tags=("flow",))
+    for prefix, langs in _FLOW_PREFIXES.items() for suffix, kind in _FLOW_SUFFIXES.items()
+]
+
+RULES_BY_ID = {rule.id: rule for rule in RULES + FLOW_RULES}

@@ -206,6 +206,40 @@ export interface AIModel {
 
 export type FixVerdict = "applied" | "helpful" | "not_helpful";
 
+// Mode formation (SS-24)
+export interface ExerciseSummary {
+  id: string;
+  title: string;
+  language: string;
+  cwe: string;
+  difficulty: "facile" | "moyenne" | "difficile";
+  passed: boolean;
+  attempts: number;
+}
+
+export interface ExerciseDetail extends Omit<ExerciseSummary, "passed" | "attempts"> {
+  brief: string;
+  code: string;
+  filename: string;
+  hints: string[];
+  passed: boolean;
+  attempts: number;
+  last_code: string | null;
+  solution: string | null;
+}
+
+export interface SubmissionResult {
+  passed: boolean;
+  checks: { label: string; ok: boolean; detail: string }[];
+  ai: { fixed: boolean; feedback: string } | null;
+  solution: string | null;
+}
+
+export interface TeamTraining {
+  total: number;
+  members: { name: string; email: string; passed: number; attempts: number; last_activity: string | null }[];
+}
+
 export interface OperatorDashboard {
   organizations: {
     name: string; plan: string; created_at: string; members: number; scans: number; active_weeks: number;
@@ -257,7 +291,8 @@ export interface Billing {
   monthly_estimate_eur: number;
   catalog: PlanOffer[];
   invoices: Invoice[];
-  provider: "demo" | "webhook";
+  provider: "demo" | "webhook" | "stripe";
+  has_subscription: boolean;
   can_manage: boolean;
 }
 
@@ -382,8 +417,15 @@ export const api = {
   sendSurvey: (recommend: number, useful: string, missing: string) =>
     request("/api/beta/survey", send("POST", { recommend, useful, missing })),
   operator: () => request<OperatorDashboard>("/api/operator/beta"),
-  selectPlan: (plan: PlanId) => request<{ invoice: Invoice | null }>("/api/billing/plan", send("POST", { plan })),
+  selectPlan: (plan: PlanId) =>
+    request<{ invoice: Invoice | null; checkout_url?: string }>("/api/billing/plan", send("POST", { plan })),
+  billingPortal: () => request<{ url: string }>("/api/billing/portal", send("POST")),
   costs: () => request<Costs>("/api/costs"),
+  exercises: () => request<{ exercises: ExerciseSummary[]; passed: number; total: number }>("/api/training/exercises"),
+  exercise: (id: string) => request<ExerciseDetail>(`/api/training/exercises/${id}`),
+  submitExercise: (id: string, code: string) =>
+    request<SubmissionResult>(`/api/training/exercises/${id}/submit`, json({ code })),
+  teamTraining: () => request<TeamTraining>("/api/training/progress"),
   aiSettings: () => request<AISettings>("/api/settings/ai"),
   aiModels: () => request<AIModel[]>("/api/settings/ai/models"),
   saveAISettings: (model: string, api_key: string) =>

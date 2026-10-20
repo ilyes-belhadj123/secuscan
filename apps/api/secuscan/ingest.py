@@ -260,6 +260,13 @@ class Workspace:
         base.mkdir(parents=True, exist_ok=True)
         self.path = Path(tempfile.mkdtemp(prefix="scan-", dir=base))
 
+    @classmethod
+    def existing(cls, path: Path) -> "Workspace":
+        """Répertoire déjà créé (par l'API), repris par le worker qui exécute l'analyse."""
+        workspace = cls.__new__(cls)
+        workspace.path = path
+        return workspace
+
     def cleanup(self) -> None:
         remove_tree(self.path)
 

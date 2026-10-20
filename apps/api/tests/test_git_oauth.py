@@ -9,7 +9,7 @@ import pytest
 from conftest import register
 from cryptography.exceptions import InvalidTag
 
-from secuscan import gitproviders, main
+from secuscan import gitproviders, pipeline
 from secuscan.tokenbox import decrypt, encrypt
 
 GH_TOKEN = "gho_FAKE_TEST_TOKEN_0000000000000000"
@@ -106,7 +106,7 @@ def test_private_repo_scan_passes_token_out_of_band(api, github, monkeypatch):
         dest.mkdir(parents=True)
         (dest / "app.py").write_text("import os\nos.system(cmd)\n", encoding="utf-8")
 
-    monkeypatch.setattr(main, "clone_repository", fake_clone)
+    monkeypatch.setattr(pipeline, "clone_repository", fake_clone)
     client = register(api(), "jane.doe@example.com")
     _connect(client)
     scan = client.post("/api/scans/git", json={"provider": "github", "repo": "acme/portail-prive"}).json()

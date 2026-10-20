@@ -28,6 +28,7 @@ from .deps import (
 from .mailer import send_email
 from .pipeline import ScanService
 from .plans import QuotaExceeded, get_plan
+from .stripe_billing import sync_seats
 
 router = APIRouter(prefix="/api")
 login_limiter = LoginRateLimiter()
@@ -102,7 +103,8 @@ def _me(service: ScanService, ctx: Context) -> dict:
 
 # ---------------------------------------------------------------------- authentification
 @router.post("/auth/register", status_code=201)
-def register(body: RegisterRequest, response: Response, service: ScanService = Depends(get_service)):
+def register(body: RegisterRequest, response: Response, background: BackgroundTasks,
+             service: ScanService = Depends(get_service)):
     storage = service.storage
     email = body.email.lower()
     if problem := password_problem(body.password):
@@ -129,6 +131,8 @@ def register(body: RegisterRequest, response: Response, service: ScanService = D
     storage.add_membership(org_id, user["id"], role)
     via = "invitation" if invitation else "création"
     storage.audit("member.joined", user["id"], {"email": email, "role": role, "via": via}, org_id=org_id, actor=email)
+    if invitation:
+        background.add_task(sync_seats, service, org_id)  # un siège de plus dans l'abonnement Stripe
     _open_session(response, service, user["id"], org_id)
     return {"ok": True}
 
@@ -278,7 +282,8 @@ def change_role(user_id: str, body: RoleRequest, ctx: Context = Depends(require_
 
 
 @router.delete("/org/members/{user_id}")
-def remove_member(user_id: str, ctx: Context = Depends(current_context), service: ScanService = Depends(get_service)):
+def remove_member(user_id: str, background: BackgroundTasks, ctx: Context = Depends(current_context),
+                  service: ScanService = Depends(get_service)):
     storage = service.storage
     leaving_self = user_id == ctx.user_id
     if not (leaving_self or ctx.is_admin):
@@ -292,6 +297,7 @@ def remove_member(user_id: str, ctx: Context = Depends(current_context), service
         raise HTTPException(409, "L'organisation doit conserver au moins un propriétaire.")
     storage.remove_membership(ctx.org_id, user_id)
     storage.audit("member.removed", user_id, {"self": leaving_self}, org_id=ctx.org_id, actor=ctx.email)
+    background.add_task(sync_seats, service, ctx.org_id)
     return {"ok": True}
 
 
@@ -305,7 +311,8 @@ def invitation_preview(token: str, service: ScanService = Depends(get_service)):
 
 
 @router.post("/invitations/{token}/accept")
-def accept(token: str, ctx: Context = Depends(current_context), service: ScanService = Depends(get_service)):
+def accept(token: str, background: BackgroundTasks, ctx: Context = Depends(current_context),
+           service: ScanService = Depends(get_service)):
     inv = _valid_invitation(service, token)
     if inv["email"] != ctx.email:
         raise HTTPException(403, "Cette invitation est destinée à une autre adresse e-mail.")
@@ -317,4 +324,5 @@ def accept(token: str, ctx: Context = Depends(current_context), service: ScanSer
     storage.set_session_org(ctx.session, inv["org_id"])
     storage.audit("member.joined", ctx.user_id, {"email": ctx.email, "role": inv["role"], "via": "invitation"},
                   org_id=inv["org_id"], actor=ctx.email)
+    background.add_task(sync_seats, service, inv["org_id"])
     return {"ok": True}

@@ -6,6 +6,7 @@ import {
   ForgotPasswordPage, InvitationPage, LoginPage, RegisterPage, ResetPasswordPage,
 } from "./pages/AuthPages";
 import CostsPage from "./pages/CostsPage";
+import ExercisePage from "./pages/ExercisePage";
 import FindingPage from "./pages/FindingPage";
 import HomePage from "./pages/HomePage";
 import OperatorPage from "./pages/OperatorPage";
@@ -13,6 +14,7 @@ import OrgPage from "./pages/OrgPage";
 import PlanPage from "./pages/PlanPage";
 import ScanPage from "./pages/ScanPage";
 import SettingsPage from "./pages/SettingsPage";
+import TrainingPage from "./pages/TrainingPage";
 import { isAdmin, useSession } from "./session";
 
 function Logo() {
@@ -60,6 +62,7 @@ function Topbar({ health }: { health: Health | null }) {
       <span className="spacer" />
       {me && (
         <>
+          <Link to="/formation" className="small" style={{ fontWeight: 600 }}>Formation</Link>
           <Link to="/couts" className="small" style={{ fontWeight: 600 }}>Coûts IA</Link>
           {isAdmin(me) && <Link to="/audit" className="small" style={{ fontWeight: 600 }}>Journal d'audit</Link>}
           <Link to="/organisation" className="small" style={{ fontWeight: 600 }}>Équipe</Link>
@@ -105,6 +108,8 @@ export default function App() {
           <Route path="/scans/:scanId" element={<ScanPage />} />
           <Route path="/scans/:scanId/findings/:findingId" element={<FindingPage />} />
           <Route path="/couts" element={<CostsPage />} />
+          <Route path="/formation" element={<TrainingPage />} />
+          <Route path="/formation/:exerciseId" element={<ExercisePage />} />
           <Route path="/audit" element={isAdmin(me) ? <AuditPage /> : <Navigate to="/" replace />} />
           <Route path="/organisation" element={<OrgPage />} />
           <Route path="/offre" element={<PlanPage />} />
