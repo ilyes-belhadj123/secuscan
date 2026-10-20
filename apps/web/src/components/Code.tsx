@@ -1,4 +1,7 @@
 import hljs from "highlight.js/lib/core";
+import csharp from "highlight.js/lib/languages/csharp";
+import dockerfile from "highlight.js/lib/languages/dockerfile";
+import go from "highlight.js/lib/languages/go";
 import java from "highlight.js/lib/languages/java";
 import javascript from "highlight.js/lib/languages/javascript";
 import json from "highlight.js/lib/languages/json";
@@ -6,6 +9,7 @@ import php from "highlight.js/lib/languages/php";
 import python from "highlight.js/lib/languages/python";
 import typescript from "highlight.js/lib/languages/typescript";
 import xml from "highlight.js/lib/languages/xml";
+import yaml from "highlight.js/lib/languages/yaml";
 import { useMemo } from "react";
 
 hljs.registerLanguage("python", python);
@@ -13,6 +17,10 @@ hljs.registerLanguage("javascript", javascript);
 hljs.registerLanguage("typescript", typescript);
 hljs.registerLanguage("php", php);
 hljs.registerLanguage("java", java);
+hljs.registerLanguage("csharp", csharp);
+hljs.registerLanguage("go", go);
+hljs.registerLanguage("dockerfile", dockerfile);
+hljs.registerLanguage("yaml", yaml);
 hljs.registerLanguage("json", json);
 hljs.registerLanguage("xml", xml);
 
@@ -20,6 +28,7 @@ hljs.registerLanguage("xml", xml);
 export function highlightLanguage(file: string, language: string): string | null {
   if (file.endsWith(".json")) return "json";
   if (file.endsWith(".xml")) return "xml";
+  if (language === "kubernetes" || language === "compose") return "yaml";
   if (file.endsWith(".txt") || file.endsWith(".toml") || file.endsWith(".lock")) return null;
   return hljs.getLanguage(language) ? language : null;
 }

@@ -27,11 +27,11 @@ from collections.abc import Callable
 from dataclasses import asdict, dataclass, field
 from pathlib import Path
 
-from .analyzers import external, sast, sca, secrets
+from .analyzers import external, history, sast, sca, secrets
 from .analyzers.context import enclosing_excerpt
 from .analyzers.rules import RULES_BY_ID
 from .config import Settings
-from .ingest import MANIFEST_FILES, SourceFile, collect_codebase
+from .ingest import MANIFEST_FILES, SourceFile, collect_codebase, is_excluded, language_for_filename, manifest_kind
 from .models import Finding, SecretInfo
 from .taxonomy import owasp_for
 
@@ -137,7 +137,7 @@ def _external_engines(settings: Settings, root: Path, code_files: dict) -> list:
 
 
 def _sast(scan_id: str, settings: Settings, redacted: dict, root: Path, existing: list[Finding]) -> list[Finding]:
-    code_files = {p: s for p, s in redacted.items() if p.split("/")[-1] not in MANIFEST_FILES}
+    code_files = {p: s for p, s in redacted.items() if not manifest_kind(p.split("/")[-1])}
     raws = [raw for source in code_files.values() for raw in sast.analyze_file(source)]
     # Moteurs externes (SS-5) : une ligne déjà signalée (règle maison ou secret) n'est pas dupliquée
     flagged = {(f.file, f.start_line) for f in existing} | {(r.file, r.start_line) for r in raws}
@@ -171,12 +171,39 @@ def _sast(scan_id: str, settings: Settings, redacted: dict, root: Path, existing
     return findings
 
 
+def _history_secrets(scan_id: str, history_file: Path, current: list[Finding], exclude: list[str]) -> list[Finding]:
+    known = {f.secret.fingerprint for f in current if f.secret}
+    findings = []
+    for h in history.find_history_secrets(history_file.read_text(encoding="utf-8", errors="replace"), known):
+        if is_excluded(h.path, exclude):
+            continue
+        pat = h.match.pattern
+        findings.append(Finding(
+            id=new_id(), scan_id=scan_id, kind="secret", rule_id=pat.id,
+            title=f"Secret dans l'historique Git : {pat.label}",
+            message=f"Ce secret a été ajouté par le commit {h.commit} ({h.date}) et ne figure plus dans le code "
+                    "actuel, mais il reste lisible par toute personne ayant accès au dépôt et à son historique.",
+            fix_hint="Le considérer comme compromis : le révoquer et le remplacer, puis purger l'historique "
+                     "(git filter-repo) et demander à chacun de recloner le dépôt.",
+            language=language_for_filename(h.path) or "text", file=h.path, start_line=h.line, end_line=h.line,
+            snippet=h.redacted_line, snippet_start_line=h.line, cwe="CWE-798", owasp=owasp_for("CWE-798"),
+            raw_severity=pat.severity, severity=pat.severity,
+            fingerprint=_fingerprint(pat.id, "history", h.match.fingerprint),
+            secret=SecretInfo(secret_type=pat.label, masked=h.match.masked, fingerprint=h.match.fingerprint,
+                              commit=h.commit, commit_date=h.date),
+        ))
+    return findings
+
+
 def analyze_static(root: Path, settings: Settings, scan_id: str, exclude: list[str] | None = None,
-                   progress: Callable[[str, float], None] | None = None) -> StaticResult:
+                   progress: Callable[[str, float], None] | None = None,
+                   history_file: Path | None = None) -> StaticResult:
     progress = progress or (lambda stage, value: None)
     codebase = collect_codebase(root, settings, exclude)
     progress("Détection des secrets", 0.15)
     findings, redacted = _secrets(scan_id, codebase)
+    if history_file and history_file.is_file():
+        findings += _history_secrets(scan_id, history_file, findings, exclude or [])
     progress("Analyse statique (règles)", 0.3)
     findings += _sast(scan_id, settings, redacted, root, findings)
     return StaticResult(
@@ -187,8 +214,10 @@ def analyze_static(root: Path, settings: Settings, scan_id: str, exclude: list[s
 
 
 # ---------------------------------------------------------------------- modes d'isolation
-def _request(root: Path, settings: Settings, scan_id: str, exclude: list[str] | None) -> dict:
+def _request(root: Path, settings: Settings, scan_id: str, exclude: list[str] | None,
+             history_file: Path | None = None) -> dict:
     return {"root": str(root.resolve()), "scan_id": scan_id, "exclude": exclude or [],
+            "history": str(history_file.resolve()) if history_file else None,
             "settings": {k: getattr(settings, k) for k in FORWARDED_SETTINGS}}
 
 
@@ -213,8 +242,9 @@ def _limit_resources() -> None:  # pragma: no cover — exécuté dans le sous-p
     resource.setrlimit(resource.RLIMIT_CPU, (SANDBOX_TIMEOUT_SECONDS, SANDBOX_TIMEOUT_SECONDS))
 
 
-def run_in_process(root: Path, settings: Settings, scan_id: str, exclude: list[str] | None) -> StaticResult:
-    request = json.dumps(_request(root, settings, scan_id, exclude))
+def run_in_process(root: Path, settings: Settings, scan_id: str, exclude: list[str] | None,
+                   history_file: Path | None = None) -> StaticResult:
+    request = json.dumps(_request(root, settings, scan_id, exclude, history_file))
     try:
         done = subprocess.run(
             [sys.executable, "-m", "secuscan.sandbox", "run"], input=request, capture_output=True, text=True,
@@ -229,12 +259,12 @@ def run_in_process(root: Path, settings: Settings, scan_id: str, exclude: list[s
 
 
 def run_in_container(root: Path, settings: Settings, scan_id: str, exclude: list[str] | None,
-                     poll: float = 0.5) -> StaticResult:
+                     poll: float = 0.5, history_file: Path | None = None) -> StaticResult:
     """Dépose la demande dans le dossier partagé et attend la réponse du conteneur isolé."""
     box = settings.sandbox_dir
     job = new_id()
     tmp = box / f"{job}.request.tmp"
-    tmp.write_text(json.dumps(_request(root, settings, scan_id, exclude)), encoding="utf-8")
+    tmp.write_text(json.dumps(_request(root, settings, scan_id, exclude, history_file)), encoding="utf-8")
     tmp.replace(box / f"{job}.request.json")  # dépôt atomique : jamais lu à moitié écrit
     deadline = time.monotonic() + SANDBOX_TIMEOUT_SECONDS
     result, error = box / f"{job}.result.json", box / f"{job}.error.txt"
@@ -254,21 +284,25 @@ def run_in_container(root: Path, settings: Settings, scan_id: str, exclude: list
 
 
 def static_analysis(root: Path, settings: Settings, scan_id: str, exclude: list[str] | None = None,
-                    progress: Callable[[str, float], None] | None = None) -> StaticResult:
+                    progress: Callable[[str, float], None] | None = None,
+                    history_file: Path | None = None) -> StaticResult:
     mode = settings.secuscan_sandbox
     if mode == "process":
-        return run_in_process(root, settings, scan_id, exclude)
+        return run_in_process(root, settings, scan_id, exclude, history_file)
     if mode == "container":
-        return run_in_container(root, settings, scan_id, exclude)
-    return analyze_static(root, settings, scan_id, exclude, progress)
+        return run_in_container(root, settings, scan_id, exclude, history_file=history_file)
+    return analyze_static(root, settings, scan_id, exclude, progress, history_file)
 
 
 # ---------------------------------------------------------------------- côté isolé
 def _handle(request: dict, allowed_roots: list[Path]) -> StaticResult:
     root = Path(request["root"]).resolve()
-    if allowed_roots and not any(root.is_relative_to(a.resolve()) for a in allowed_roots):
-        raise SandboxError(f"Dossier hors du périmètre autorisé : {root}")
-    return analyze_static(root, _settings_from(request), str(request["scan_id"]), request.get("exclude"))
+    history_file = Path(request["history"]).resolve() if request.get("history") else None
+    for path in filter(None, (root, history_file)):
+        if allowed_roots and not any(path.is_relative_to(a.resolve()) for a in allowed_roots):
+            raise SandboxError(f"Dossier hors du périmètre autorisé : {path}")
+    return analyze_static(root, _settings_from(request), str(request["scan_id"]), request.get("exclude"),
+                          history_file=history_file)
 
 
 def serve_once(box: Path, allowed_roots: list[Path]) -> int:

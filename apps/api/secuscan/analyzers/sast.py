@@ -8,6 +8,7 @@ from dataclasses import dataclass
 
 from ..ingest import SourceFile
 from ..models import Severity
+from .iac import IAC_LANGUAGES, file_findings
 from .rules import RULES, RULES_BY_ID, Rule
 from .taint import describe, find_flows
 
@@ -65,7 +66,19 @@ def analyze_file(source: SourceFile, rules: list[Rule] = RULES) -> list[RawFindi
             )
     if rules is RULES:
         results += _flows(source, results)
+        if source.language in IAC_LANGUAGES:
+            results += _file_level(source, results)
     return results
+
+
+def _file_level(source: SourceFile, line_findings: list[RawFinding]) -> list[RawFinding]:
+    """Contrôles d'infrastructure qui portent sur le fichier entier (iac.py)."""
+    flagged = {(f.start_line, f.cwe) for f in line_findings}
+    return [
+        RawFinding(kind="sast", rule_id=rule.id, title=rule.title, message=rule.description, cwe=rule.cwe,
+                   severity=rule.severity, file=source.path, language=source.language, start_line=line, end_line=line)
+        for rule, line in file_findings(source) if (line, rule.cwe) not in flagged
+    ]
 
 
 def _flows(source: SourceFile, line_findings: list[RawFinding]) -> list[RawFinding]:

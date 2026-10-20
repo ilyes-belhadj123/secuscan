@@ -24,6 +24,8 @@ const EXTENSIONS = [
   { ext: "ts", label: "TypeScript" },
   { ext: "php", label: "PHP" },
   { ext: "java", label: "Java" },
+  { ext: "cs", label: "C#" },
+  { ext: "go", label: "Go" },
 ];
 
 export default function HomePage({ health }: { health: Health | null }) {

@@ -30,6 +30,12 @@ export const LANGUAGE_LABEL: Record<string, string> = {
   typescript: "TypeScript",
   php: "PHP",
   java: "Java",
+  csharp: "C#",
+  go: "Go",
+  dockerfile: "Dockerfile",
+  kubernetes: "Kubernetes",
+  compose: "Docker Compose",
+  terraform: "Terraform",
 };
 
 export const VERDICT_LABEL = {

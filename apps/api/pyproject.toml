@@ -21,6 +21,8 @@ dependencies = [
     "cryptography>=50.0.1",
     "bandit>=1.9.4",
     "defusedxml>=0.7.1",
+    "tree-sitter-c-sharp>=0.23",
+    "tree-sitter-go>=0.23",
 ]
 
 [dependency-groups]

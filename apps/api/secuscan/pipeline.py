@@ -9,8 +9,17 @@ from pathlib import Path
 from .ai.enricher import BATCH_SIZE, AIBudget, AIUnavailable, BudgetExceeded, Enricher
 from .analyzers import sca
 from .analyzers.context import enclosing_excerpt, file_header
+from .analyzers.history import HISTORY_FILE
 from .config import Settings
-from .ingest import MANIFEST_FILES, SourceFile, Workspace, clone_repository, remove_tree
+from .ingest import (
+    CODE_LANGUAGES,
+    MANIFEST_FILES,
+    SourceFile,
+    Workspace,
+    clone_repository,
+    manifest_kind,
+    remove_tree,
+)
 from .models import SEVERITY_ORDER, DependencyInfo, Finding, Scan, Severity, now_iso
 from .sandbox import _fingerprint, _normalize, new_id, static_analysis
 from .scoring import apply_severity, project_score
@@ -97,7 +106,8 @@ class ScanService:
                 self._progress(scan, "Clonage du dépôt", 0.02)
                 remove_tree(root)  # reprise après l'arrêt d'un worker : clone partiel éventuel
                 clone_repository(clone.url, clone.branch, root, self.settings, auth_header=clone.auth_header)
-            self.run(scan, root)
+            # Historique exporté au clonage, à côté du code : secrets supprimés mais encore lisibles
+            self.run(scan, root, history_file=root.parent / HISTORY_FILE if clone else None)
         except Exception as exc:  # noqa: BLE001 — l'erreur est remontée à l'utilisateur
             log.exception("Analyse %s échouée", scan.id)
             scan.status, scan.error, scan.stage = "failed", str(exc), "Échec"
@@ -112,14 +122,16 @@ class ScanService:
         scan.stage, scan.progress = stage, round(progress, 3)
         self.storage.save_scan(scan)
 
-    def run(self, scan: Scan, root: Path, exclude: list[str] | None = None) -> list[Finding]:
+    def run(self, scan: Scan, root: Path, exclude: list[str] | None = None,
+            history_file: Path | None = None) -> list[Finding]:
         started = time.monotonic()
         scan.status = "running"
         scan.ai_enabled = self.settings.ai_enabled
         self._progress(scan, "Lecture du code et détection des langages", 0.05)
         # Seule étape qui lit le code importé : isolable (SS-4), sans réseau ni secret
         static = static_analysis(root, self.settings, scan.id, exclude,
-                                 progress=lambda stage, value: self._progress(scan, stage, value))
+                                 progress=lambda stage, value: self._progress(scan, stage, value),
+                                 history_file=history_file)
         scan.summary.files_scanned = static.files_scanned
         scan.summary.lines_scanned = static.lines_scanned
         scan.summary.languages = static.languages
@@ -180,7 +192,7 @@ class ScanService:
                             f"(dont {cve}) : {main.summary}",
                     fix_hint=(f"Mettre à jour vers {vuln.fixed_version} ou une version ultérieure."
                               if vuln.fixed_version else "Aucune version corrigée : remplacer la bibliothèque."),
-                    language=MANIFEST_FILES[dep.manifest.split("/")[-1]], file=dep.manifest,
+                    language=MANIFEST_FILES[manifest_kind(dep.manifest.split("/")[-1])], file=dep.manifest,
                     start_line=dep.line, end_line=dep.line,
                     snippet="\n".join(lines[top - 1 : bottom]), snippet_start_line=top,
                     cwe=CWE_DEPENDENCY, owasp=owasp_for(CWE_DEPENDENCY),
@@ -209,7 +221,7 @@ class ScanService:
         """Revue IA de chaque fichier de code pour les failles logiques non couvertes par les règles."""
         candidates = [
             src for path, src in redacted.items()
-            if path.split("/")[-1] not in MANIFEST_FILES
+            if not manifest_kind(path.split("/")[-1]) and src.language in CODE_LANGUAGES
             and src.content.count("\n") < self.settings.secuscan_logic_max_lines
         ]
         # Budget : au plus une part des appels, en commençant par les fichiers exposés (routes, entrées)

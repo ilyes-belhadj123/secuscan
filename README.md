@@ -1,7 +1,8 @@
 # SecuScan — analyse de sécurité du code assistée par IA (version démo)
 
-Détecte les failles (Python, JavaScript/TypeScript, PHP, Java), les secrets commités et les
-dépendances vulnérables, puis l'IA (Claude via OpenRouter) écarte les faux positifs, explique
+Détecte les failles (Python, JavaScript/TypeScript, PHP, Java, C#, Go), les erreurs de configuration
+d'infrastructure (Dockerfile, Kubernetes, docker-compose, Terraform), les secrets commités (y compris
+supprimés mais encore dans l'historique Git) et les dépendances vulnérables, puis l'IA (Claude via OpenRouter) écarte les faux positifs, explique
 chaque faille en français et propose un correctif sous forme de diff.
 
 📊 **Suivi des tickets : [docs/AVANCEMENT.md](docs/AVANCEMENT.md)**

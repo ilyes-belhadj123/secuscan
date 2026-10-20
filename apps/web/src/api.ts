@@ -72,7 +72,10 @@ export interface Finding {
     advisories: Advisory[];
     fixed_version: string | null;
   } | null;
-  secret: { secret_type: string; masked: string; fingerprint: string } | null;
+  secret: {
+    secret_type: string; masked: string; fingerprint: string;
+    commit?: string | null; commit_date?: string | null; // retrouvé dans l'historique Git
+  } | null;
 }
 
 export interface ScanSummary {

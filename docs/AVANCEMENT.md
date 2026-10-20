@@ -19,9 +19,9 @@ Mesure du 23/09/2026 sur 83 failles annotées (4 langages) — rapport complet :
 
 | Mode | Taux de détection | Taux de faux positifs | Objectif cahier des charges |
 |---|---|---|---|
-| Règles seules (corpus agrandi : + flux de données et nouvelles familles) | **98 %** (109/111) | **4 %** (5) | > 85 % / < 15 % |
-| Règles + IA (Claude, réel, alertes relues par lots ; corpus avant agrandissement) | **100 %** (86/86) | **7 %** (6) | > 85 % / < 15 % |
-| Correctifs syntaxiquement valides | **100 %** (92/92, dont 1 réparé par relance) | | > 80 % |
+| Règles seules (6 langages + infrastructure, 151 failles) | **99 %** (149/151) | **3 %** (5) | > 85 % / < 15 % |
+| Règles + IA (Claude, réel, 6 langages + infrastructure, 151 failles) | **100 %** (151/151) | **6 %** (10) | > 85 % / < 15 % |
+| Correctifs syntaxiquement valides | **100 %** (139/139 vérifiables, dont 1 réparé par relance) | | > 80 % |
 
 Rapport IA : [benchmark/results/latest-ai.md](../benchmark/results/latest-ai.md). L'IA trouve les 2 failles
 logiques hors de portée des règles et écarte les faux positifs de construction de requête avec une
@@ -51,9 +51,9 @@ volontairement vulnérable « Acme Shop » (4 langages).
 
 | Ticket | Titre | Statut | Réalisé | Reste à faire |
 |---|---|---|---|---|
-| SS-5 | Moteur de règles statiques | ✅ | 54 règles maison (Python, JS/TS, PHP, Java) + **suivi des données dans le fichier** (entrée utilisateur suivie à travers les variables jusqu'à SQL, HTML, commande, requête réseau, fichier, redirection ; nettoyages et listes blanches reconnus) ; nouvelles familles : SSRF, JWT non vérifié, NoSQL, pollution de prototype, chiffrement faible, CSRF désactivé, cookies, secrets d'application, XXE Python ; **Bandit** intégré (Apache 2.0) ; adaptateur **SARIF** générique ; Opengrep branchable avec des règles propres ; bibliothèques tierces minifiées ignorées ; [choix et licences](moteurs-sast.md) | Écrire des règles maison au format Opengrep ; faire valider l'analyse de licences |
-| SS-6 | Détection de secrets | ✅ | Motifs + entropie, valeur jamais stockée ni envoyée à l'IA (masque + empreinte), testé | — |
-| SS-7 | Analyse des dépendances (SCA) | ✅ | requirements / pyproject, package.json / lock, composer, pom.xml ; base OSV.dev + cache ; version corrigée | — |
+| SS-5 | Moteur de règles statiques | ✅ | règles maison pour **Python, JS/TS, PHP, Java, C# et Go** et pour l'**infrastructure** (Dockerfile, Kubernetes, docker-compose, Terraform : conteneur root ou privilégié, socket Docker, bucket public, port ouvert à Internet, IAM « * », chiffrement désactivé…) + **suivi des données dans le fichier** (entrée utilisateur suivie à travers les variables jusqu'à SQL, HTML, commande, requête réseau, fichier, redirection ; nettoyages et listes blanches reconnus) ; nouvelles familles : SSRF, JWT non vérifié, NoSQL, pollution de prototype, chiffrement faible, CSRF désactivé, cookies, secrets d'application, XXE Python ; **Bandit** intégré (Apache 2.0) ; adaptateur **SARIF** générique ; Opengrep branchable avec des règles propres ; bibliothèques tierces minifiées ignorées ; [choix et licences](moteurs-sast.md) | Écrire des règles maison au format Opengrep ; faire valider l'analyse de licences |
+| SS-6 | Détection de secrets | ✅ | Motifs + entropie, valeur jamais stockée ni envoyée à l'IA (masque + empreinte), testé ; **secrets supprimés mais encore dans l'historique Git** (200 derniers commits, git lancé uniquement sur un dépôt cloné par SecuScan, jamais sur le .git d'une archive importée) | — |
+| SS-7 | Analyse des dépendances (SCA) | ✅ | requirements / pyproject, package.json / lock, composer, pom.xml, **.csproj (NuGet), go.mod** ; base OSV.dev + cache ; version corrigée | — |
 | SS-8 | Jeu de référence (benchmark) | ✅ | Corpus annoté 4 langages (cas vulnérables + cas sûrs), `python -m secuscan.benchmark` (détection, faux positifs, mode `--ai`), job CI nocturne + garde-fou de non-régression | Corpus externes (NodeGoat, DVWA, WebGoat) |
 
 ## Sprint 3 — IA

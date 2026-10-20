@@ -149,6 +149,53 @@ _FUNCTION_START = {
 # Paramètres reçus du client par annotation (Spring) : teintés dès la signature
 _ANNOTATED_PARAM = _r(r"@(RequestParam|PathVariable|RequestBody|RequestHeader)(\([^)]*\))?\s+(final\s+)?"
                       r"[\w<>\[\]]+\s+(\w+)")
+# ---------------------------------------------------------------------- C# (ASP.NET Core) et Go
+SOURCES["csharp"] = _r(r"\bRequest\.(Query|Form|Body|Headers|Cookies|RouteValues)\b|HttpContext\.Request\.")
+SOURCES["go"] = _r(r"\br\.URL\.Query\(\)|\br\.(FormValue|PostFormValue)\(|\br\.(Form|PostForm|Body)\b|"
+                   r"\br\.Header\.Get\(|\bmux\.Vars\(|\bc\.(Query|DefaultQuery|Param|PostForm|GetHeader|FormValue)\(")
+SANITIZERS["csharp"] = _r(r"\b(HtmlEncoder\.Default\.Encode|WebUtility\.HtmlEncode|HttpUtility\.HtmlEncode|"
+                          r"Uri\.EscapeDataString|Path\.GetFileName|int\.Parse|long\.Parse|Guid\.Parse|"
+                          r"Convert\.ToInt32|Convert\.ToInt64)\([^()]*\)")
+SANITIZERS["go"] = _r(r"\b(html\.EscapeString|template\.HTMLEscapeString|url\.PathEscape|url\.QueryEscape|"
+                      r"filepath\.Base|path\.Base|strconv\.(Atoi|ParseInt|ParseUint|ParseFloat|ParseBool))\([^()]*\)"
+                      # sortie d'un programme lancé sans shell : produite par le programme, pas par le client
+                      r"|exec\.Command(Context)?\([^()]*\)\.(Output|CombinedOutput)\(\)")
+ASSIGN["csharp"] = _r(r"^\s*(?:using\s+)?(?:var|[\w.<>\[\]?]+)?\s*([A-Za-z_]\w*)\s*\+?=(?![=>])\s*(.+)$")
+ASSIGN["go"] = _r(r"^\s*([A-Za-z_]\w*(?:\s*,\s*[A-Za-z_]\w*)*)\s*:?=(?!=)\s*(.+)$")
+SINKS["csharp"] = [
+    Sink("CS-SQLI-FLOW", "sql", _r(r"new\s+SqlCommand\(|\.(ExecuteSqlRaw|ExecuteSqlRawAsync|FromSqlRaw|SqlQueryRaw)\(")),
+    Sink("CS-SQLI-FLOW", "sql", _r(r"\.CommandText\s*="), first_arg=False),
+    Sink("CS-CMDI-FLOW", "cmd", _r(r"Process\.Start\(|\.Arguments\s*="), first_arg=False),
+    Sink("CS-SSRF", "ssrf", _r(r"\.(GetAsync|GetStringAsync|GetByteArrayAsync|GetStreamAsync|PostAsync|DeleteAsync)\("
+                               r"|new\s+Uri\(|WebRequest\.Create\(")),
+    Sink("CS-PATH-FLOW", "path", _r(r"\bFile\.(ReadAllText|ReadAllBytes|ReadAllLines|OpenRead|Open|WriteAllText|Delete)\("
+                                    r"|new\s+FileStream\(|\bPhysicalFile\(")),
+    Sink("CS-REDIRECT-FLOW", "redirect", _r(r"(?<![\w.])Redirect(Permanent)?\(")),
+    Sink("CS-XSS-FLOW", "xss", _r(r"(?<![\w.])Content\(|\bHtml\.Raw\(|\.Response\.WriteAsync\(")),
+]
+SINKS["go"] = [
+    Sink("GO-SQLI-FLOW", "sql", _r(r"\.(QueryContext|QueryRowContext|ExecContext)\(\s*[^,]+,"
+                                   r"|\.(Query|QueryRow|Exec|Raw)\(")),
+    Sink("GO-CMDI-FLOW", "cmd", _r(r"exec\.Command(Context)?\(\s*\"(sh|bash|/bin/sh|/bin/bash|cmd|cmd\.exe|powershell)\"\s*,"
+                                   r"\s*\"(-c|/c|-Command)\"\s*,")),
+    Sink("GO-CMDI-FLOW", "cmd", _r(r"exec\.Command\(")),  # nom du programme fourni par le client
+    Sink("GO-SSRF", "ssrf", _r(r"\bhttp\.(Get|Post|Head|PostForm)\(|\bhttp\.NewRequest\(\s*[^,]+,|\bclient\.(Get|Post)\(")),
+    Sink("GO-PATH-FLOW", "path", _r(r"\bos\.(Open|ReadFile|Create|OpenFile|Remove|WriteFile)\(|\bioutil\.ReadFile\("
+                                    r"|\bhttp\.ServeFile\([^,]+,[^,]+,")),
+    Sink("GO-REDIRECT-FLOW", "redirect", _r(r"\bhttp\.Redirect\([^,]+,[^,]+,|\bc\.Redirect\([^,]+,")),
+    Sink("GO-XSS-FLOW", "xss", _r(r"\bfmt\.Fprint(f|ln)?\(\s*w\s*,|\bw\.Write\(|\bio\.WriteString\(\s*w\s*,"
+                                  r"|\btemplate\.HTML\("), first_arg=False),
+]
+_PLAIN_STRINGS["csharp"] = _r(r"(?<![$\w])@?\"(?:[^\"\\]|\\.)*\"")  # $"…" interpole, les autres non
+_PLAIN_STRINGS["go"] = _r(r"\"(?:[^\"\\]|\\.)*\"|`[^`]*`")
+_FUNCTION_START["csharp"] = _r(r"^\s*(public|private|protected|internal)\s+(static\s+|async\s+|virtual\s+|override\s+)*"
+                               r"[\w<>\[\], ?]+\s+\w+\s*\(")
+_FUNCTION_START["go"] = _r(r"^\s*func\b")
+# ASP.NET : les paramètres texte d'une action de contrôleur sont remplis à partir de la requête
+_CS_CONTROLLER = _r(r":\s*(Controller|ControllerBase)\b|\[ApiController\]")
+_CS_ACTION = _r(r"^\s*public\s+(async\s+)?(virtual\s+)?[\w<>\[\], ?]+\s+\w+\s*\(([^)]*)\)")
+_CS_TEXT_PARAM = _r(r"(\[From\w+[^\]]*\]\s*)?\b(string|object|dynamic|IFormFile|JsonElement)\??\s+(\w+)")
+
 _COMMENT = _r(r"^\s*(#|//|/?\*)")
 for table in (SOURCES, SANITIZERS, ASSIGN, SINKS, _PLAIN_STRINGS, _FUNCTION_START):
     table["typescript"] = table["javascript"]
@@ -217,6 +264,7 @@ def find_flows(source: SourceFile) -> list[FlowFinding]:
         return []
     tainted = _Tainted(language)
     findings: list[FlowFinding] = []
+    controller = language == "csharp" and bool(_CS_CONTROLLER.search(source.content))
     for idx, line in enumerate(source.content.split("\n"), start=1):
         if not line.strip() or _COMMENT.match(line):
             continue
@@ -225,6 +273,9 @@ def find_flows(source: SourceFile) -> list[FlowFinding]:
             if language == "java":
                 for m in _ANNOTATED_PARAM.finditer(line):
                     tainted.vars[m.group(4)] = idx
+            if controller and (action := _CS_ACTION.match(line)):
+                for m in _CS_TEXT_PARAM.finditer(action.group(3)):
+                    tainted.vars[m.group(3)] = idx
         flagged = False
         for sink in SINKS[language]:
             m = sink.pattern.search(line)

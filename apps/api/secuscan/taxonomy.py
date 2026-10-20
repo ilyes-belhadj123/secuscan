@@ -57,6 +57,20 @@ CWE_TO_OWASP = {
     "CWE-798": "A07",
     "CWE-502": "A08",
     "CWE-1395": "A03",
+    # Familles ajoutées (JWT, NoSQL, cookies…) et infrastructure (Docker, Kubernetes, Terraform)
+    "CWE-347": "A04",
+    "CWE-943": "A05",
+    "CWE-1321": "A08",
+    "CWE-614": "A02",
+    "CWE-377": "A02",
+    "CWE-250": "A02",
+    "CWE-732": "A01",
+    "CWE-269": "A01",
+    "CWE-668": "A01",
+    "CWE-311": "A04",
+    "CWE-319": "A04",
+    "CWE-494": "A08",
+    "CWE-1104": "A03",
 }
 
 CWE_NAMES = {

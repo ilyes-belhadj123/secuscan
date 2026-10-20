@@ -17,12 +17,14 @@ import argparse
 import json
 import os
 import sys
+import tempfile
 from dataclasses import dataclass, field
 from pathlib import Path
 
 import httpx
 import yaml
 
+from .analyzers.history import HISTORY_FILE, export_history
 from .config import Settings, get_settings
 from .models import SEVERITY_ORDER, Finding, Scan, Severity
 from .pipeline import ScanService, new_id
@@ -33,7 +35,7 @@ from .storage import Storage
 
 EXIT_OK, EXIT_THRESHOLD, EXIT_USAGE, EXIT_ERROR = 0, 1, 2, 3
 LEVELS = ["critical", "high", "medium", "low", "none"]
-CONFIG_KEYS = {"fail_on", "exclude", "ignore_rules", "ai", "offline"}
+CONFIG_KEYS = {"fail_on", "exclude", "ignore_rules", "ai", "offline", "history"}
 
 
 class ConfigError(ValueError):
@@ -47,6 +49,7 @@ class CliConfig:
     ignore_rules: list[str] = field(default_factory=list)
     ai: bool = False
     offline: bool = False
+    history: bool = True  # secrets supprimés du code mais encore dans l'historique Git du dépôt analysé
 
 
 def load_config(path: Path | None) -> CliConfig:
@@ -71,7 +74,7 @@ def load_config(path: Path | None) -> CliConfig:
             if not isinstance(value, list) or not all(isinstance(v, str) for v in value):
                 raise ConfigError(f"{path} : {key} doit être une liste de chaînes")
             setattr(config, key, value)
-    for key in ("ai", "offline"):
+    for key in ("ai", "offline", "history"):
         if key in data:
             if not isinstance(data[key], bool):
                 raise ConfigError(f"{path} : {key} doit valoir true ou false")
@@ -95,7 +98,12 @@ def run_scan(root: Path, config: CliConfig, base: Settings | None = None) -> tup
     service = ScanService(settings, Storage(settings.data_dir / "cli.db"))
     scan = Scan(id=new_id(), project_name=f"cli:{root.resolve().name}", source="upload")
     service.storage.save_scan(scan)
-    findings = service.run(scan, root, exclude=config.exclude)
+    with tempfile.TemporaryDirectory(prefix="secuscan-history-") as tmp:
+        history_file = Path(tmp) / HISTORY_FILE
+        # Dépôt local de l'utilisateur (de confiance) : son historique est relu s'il est disponible
+        if not (config.history and export_history(root, history_file, settings.secuscan_history_commits)):
+            history_file = None
+        findings = service.run(scan, root, exclude=config.exclude, history_file=history_file)
     if config.ignore_rules:
         ignored = set(config.ignore_rules)
         for f in findings:
@@ -133,6 +141,8 @@ def main(argv: list[str] | None = None) -> int:
     scan_cmd.add_argument("--exclude", action="append", default=[], help="motif à exclure (répétable)")
     scan_cmd.add_argument("--ai", action="store_true", help="activer l'enrichissement IA (clé OpenRouter requise)")
     scan_cmd.add_argument("--offline", action="store_true", help="sans appel réseau (base OSV depuis le cache)")
+    scan_cmd.add_argument("--no-history", action="store_true",
+                          help="ne pas chercher de secrets dans l'historique Git du dépôt")
     scan_cmd.add_argument("--pr-comment", action="store_true",
                           help="commenter la pull request (GitHub Actions) ou la merge request (GitLab CI)")
     args = parser.parse_args(argv)
@@ -154,6 +164,7 @@ def main(argv: list[str] | None = None) -> int:
     config.exclude += args.exclude
     config.ai = config.ai or args.ai
     config.offline = config.offline or args.offline
+    config.history = config.history and not args.no_history
 
     try:
         scan, findings = run_scan(args.path, config)

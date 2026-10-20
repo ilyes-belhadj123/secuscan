@@ -76,6 +76,9 @@ class SecretInfo(BaseModel):
     secret_type: str
     masked: str
     fingerprint: str
+    # Secret retrouvé dans l'historique Git (absent du code actuel) : commit court et date
+    commit: str | None = None
+    commit_date: str | None = None
 
 
 class Finding(BaseModel):

@@ -1,0 +1,11 @@
+# Benchmark : même composition, configurée de façon sûre (aucune alerte attendue).
+services:
+  agent:
+    image: acme/agent:2.1
+    read_only: true
+    cap_drop: [ALL]
+    security_opt: ["no-new-privileges:true"]
+    volumes:
+      - agent-data:/var/lib/agent
+volumes:
+  agent-data:

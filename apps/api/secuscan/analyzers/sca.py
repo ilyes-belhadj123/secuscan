@@ -26,7 +26,7 @@ OSV_VULN = "https://api.osv.dev/v1/vulns/{id}"
 
 @dataclass
 class Dependency:
-    ecosystem: str  # nom d'écosystème OSV : PyPI, npm, Packagist, Maven
+    ecosystem: str  # nom d'écosystème OSV : PyPI, npm, Packagist, Maven, NuGet, Go
     name: str
     version: str
     manifest: str
@@ -151,6 +151,39 @@ def parse_pom(m: ManifestFile) -> list[Dependency]:
     return deps
 
 
+def parse_csproj(m: ManifestFile) -> list[Dependency]:
+    """<PackageReference Include="Nom" Version="1.2.3" /> (ou <Version> en élément enfant)."""
+    try:
+        root = safe_xml_fromstring(m.content, forbid_dtd=True)  # même prudence que pour pom.xml
+    except (ET.ParseError, DefusedXmlException):
+        log.warning(".csproj ignoré (XML invalide ou constructions dangereuses) : %s", m.path)
+        return []
+    deps = []
+    for ref in root.iter():
+        if ref.tag.split("}")[-1] != "PackageReference":
+            continue
+        name = ref.get("Include") or ref.get("Update")
+        version = ref.get("Version") or next(
+            (c.text for c in ref if c.tag.split("}")[-1] == "Version" and c.text), None)
+        if name and version and (version := _clean_version(version)):
+            deps.append(Dependency("NuGet", name, version, m.path, _line_of(m.content, f'"{name}"')))
+    return deps
+
+
+_GO_REQUIRE = re.compile(r"^\s*(?:require\s+)?([\w.\-~]+(?:/[\w.\-~]+)+)\s+(v[\w.\-+]+)")
+
+
+def parse_go_mod(m: ManifestFile) -> list[Dependency]:
+    """Lignes « require module v1.2.3 » et blocs « require ( … ) » ; les dépendances indirectes comptent aussi."""
+    deps = []
+    for i, line in enumerate(m.content.split("\n"), start=1):
+        if line.strip().startswith(("module ", "go ", "replace ", "exclude ", "//")):
+            continue
+        if match := _GO_REQUIRE.match(line):
+            deps.append(Dependency("Go", match.group(1), match.group(2).removeprefix("v").split("+")[0], m.path, i))
+    return deps
+
+
 PARSERS = {
     "requirements.txt": parse_requirements,
     "pyproject.toml": parse_pyproject,
@@ -159,6 +192,8 @@ PARSERS = {
     "composer.json": parse_composer_json,
     "composer.lock": parse_composer_lock,
     "pom.xml": parse_pom,
+    "*.csproj": parse_csproj,
+    "go.mod": parse_go_mod,
 }
 
 

@@ -1,0 +1,32 @@
+# Benchmark : déploiement Kubernetes mal configuré (vulnérable).
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: boutique
+spec:
+  replicas: 2
+  selector:
+    matchLabels:
+      app: boutique
+  template:
+    metadata:
+      labels:
+        app: boutique
+    spec:
+      hostNetwork: true
+      containers:
+        - name: api
+          image: acme/boutique:latest
+          securityContext:
+            privileged: true
+            allowPrivilegeEscalation: true
+            capabilities:
+              add:
+                - SYS_ADMIN
+          volumeMounts:
+            - name: docker
+              mountPath: /var/run/docker.sock
+      volumes:
+        - name: docker
+          hostPath:
+            path: /var/run/docker.sock

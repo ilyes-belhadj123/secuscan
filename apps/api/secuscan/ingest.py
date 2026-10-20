@@ -22,6 +22,8 @@ LANGUAGE_BY_EXTENSION = {
     ".tsx": "typescript",
     ".php": "php",
     ".java": "java",
+    ".cs": "csharp",
+    ".go": "go",
 }
 
 MANIFEST_FILES = {
@@ -32,11 +34,46 @@ MANIFEST_FILES = {
     "composer.json": "php",
     "composer.lock": "php",
     "pom.xml": "java",
+    "*.csproj": "csharp",  # le nom du fichier est celui du projet : MonApi.csproj
+    "go.mod": "go",
 }
+
+
+# Langages de code applicatif (revue logique IA, suivi des données) ; le reste est de l'infrastructure
+CODE_LANGUAGES = {"python", "javascript", "typescript", "php", "java", "csharp", "go"}
+_K8S = re.compile(r"^apiVersion:\s*\S+", re.M)
+_K8S_KIND = re.compile(r"^kind:\s*\w+", re.M)
+
+
+def iac_kind(filename: str) -> str | None:
+    """Fichier d'infrastructure reconnaissable à son nom : Dockerfile, Terraform, docker-compose."""
+    name = filename.lower()
+    if name == "dockerfile" or name.startswith("dockerfile.") or name.endswith(".dockerfile"):
+        return "dockerfile"
+    if name.endswith(".tf"):
+        return "terraform"
+    if re.fullmatch(r"(docker-)?compose([.-][\w.-]+)?\.ya?ml", name):
+        return "compose"
+    return None
+
+
+def yaml_kind(content: str) -> str | None:
+    """Un YAML quelconque n'est analysé que s'il décrit des ressources Kubernetes."""
+    return "kubernetes" if _K8S.search(content) and _K8S_KIND.search(content) else None
+
+
+def manifest_kind(filename: str) -> str | None:
+    """Clé de MANIFEST_FILES pour un nom de fichier (« MonApi.csproj » → « *.csproj »), ou None."""
+    if filename in MANIFEST_FILES:
+        return filename
+    if filename.lower().endswith(".csproj"):
+        return "*.csproj"
+    return None
 
 IGNORED_DIRS = {
     ".git", "node_modules", "vendor", ".venv", "venv", "env", "__pycache__",
     "dist", "build", "target", ".next", ".idea", ".vscode", "coverage",
+    "bin", "obj",  # sorties de compilation .NET
 }
 
 
@@ -180,11 +217,15 @@ def collect_codebase(root: Path, settings: Settings, exclude: list[str] | None =
         rel = "/".join(rel_parts)
         if exclude and is_excluded(rel, exclude):
             continue
-        if path.name in MANIFEST_FILES:
+        if kind := manifest_kind(path.name):
             if (content := _read_text(path)) is not None:
-                manifests.append(ManifestFile(path=rel, name=path.name, content=content))
+                manifests.append(ManifestFile(path=rel, name=kind, content=content))
             continue
-        language = LANGUAGE_BY_EXTENSION.get(path.suffix.lower())
+        language = LANGUAGE_BY_EXTENSION.get(path.suffix.lower()) or iac_kind(path.name)
+        if not language and path.suffix.lower() in (".yaml", ".yml"):
+            if (content := _read_text(path)) is not None and (language := yaml_kind(content)):
+                files.append(SourceFile(path=rel, language=language, content=content))
+            continue
         if language and (content := _read_text(path)) is not None:
             if is_vendored(rel, content):
                 vendored.append(rel)
@@ -194,7 +235,8 @@ def collect_codebase(root: Path, settings: Settings, exclude: list[str] | None =
 
 
 def language_for_filename(filename: str) -> str | None:
-    return LANGUAGE_BY_EXTENSION.get(Path(filename).suffix.lower())
+    name = Path(filename).name
+    return LANGUAGE_BY_EXTENSION.get(Path(name).suffix.lower()) or iac_kind(name)
 
 
 GIT_URL = re.compile(
@@ -223,7 +265,8 @@ def clone_repository(url: str, branch: str | None, dest: Path, settings: Setting
         raise UploadError("git n'est pas installé sur le serveur d'analyse.")
     cmd = [
         "git", "-c", "core.hooksPath=/dev/null", "-c", "core.symlinks=false", "-c", "protocol.file.allow=never",
-        "-c", "credential.helper=", "clone", "--depth", "1", "--single-branch", "--no-tags",
+        "-c", "credential.helper=", "clone", "--depth", str(max(1, settings.secuscan_history_commits)),
+        "--single-branch", "--no-tags",
     ]
     if branch:
         cmd += ["--branch", branch]
@@ -247,6 +290,9 @@ def clone_repository(url: str, branch: str | None, dest: Path, settings: Setting
         if auth_header:
             detail = detail.replace(auth_header, "****")
         raise UploadError(f"Échec du clonage du dépôt : {detail[:200]}")
+    # Historique relu ici (dépôt que SecuScan vient de cloner, configuration git maîtrisée), puis supprimé
+    from .analyzers.history import HISTORY_FILE, export_history  # import local : history dépend de ce module
+    export_history(dest, dest.parent / HISTORY_FILE, settings.secuscan_history_commits)
     remove_tree(dest / ".git")
     total = sum(p.stat().st_size for p in dest.rglob("*") if p.is_file() and not p.is_symlink())
     if total > settings.max_uncompressed_bytes:

@@ -1,5 +1,6 @@
 """Benchmark : mêmes fonctionnalités que flows_api.py, écrites de façon sûre (aucune alerte attendue)."""
 import os
+import secrets
 import sqlite3
 import subprocess
 import tempfile
@@ -12,6 +13,12 @@ from lxml import etree
 app = Flask(__name__)
 app.secret_key = os.environ["FLASK_SECRET_KEY"]
 PUBLIC_KEY = os.environ["JWT_PUBLIC_KEY"]
+EXPORT_DIR = os.environ["EXPORT_DIR"]  # dossier réservé à l'application, pas /tmp partagé
+
+
+def check_credentials(email: str, password: str) -> bool:
+    """Vérification du mot de passe haché (bcrypt, argon2…) : hors du périmètre du benchmark."""
+    raise NotImplementedError
 
 
 @app.route("/preview")
@@ -33,7 +40,7 @@ def search():
 @app.route("/archive", methods=["POST"])
 def archive():
     folder = request.form.get("folder", "")
-    subprocess.run(["tar", "czf", "/tmp/out.tgz", "--", folder], check=False)
+    subprocess.run(["tar", "czf", os.path.join(EXPORT_DIR, "out.tgz"), "--", folder], check=False)
     return "ok"
 
 
@@ -53,8 +60,11 @@ def me():
 
 @app.route("/login", methods=["POST"])
 def login():
+    if not check_credentials(request.form["email"], request.form["password"]):
+        return "identifiants invalides", 401
     resp = make_response("ok")
-    resp.set_cookie("session", request.form["sid"], secure=True, httponly=True, samesite="Lax")
+    # Identifiant de session créé par le serveur, jamais repris de la requête (fixation de session)
+    resp.set_cookie("session", secrets.token_urlsafe(32), secure=True, httponly=True, samesite="Lax")
     return resp
 
 

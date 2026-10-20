@@ -180,6 +180,14 @@ export default function FindingPage() {
               </span>
             </div>
           )}
+          {finding.secret?.commit && (
+            <div className="warning-box">
+              <strong>Supprimé du code, mais pas de l'historique</strong> : ajouté par le commit{" "}
+              <span className="mono">{finding.secret.commit}</span>
+              {finding.secret.commit_date && <> du {finding.secret.commit_date}</>}. Toute personne qui a accès au
+              dépôt peut encore le lire : révoquez-le, puis purgez l'historique (git filter-repo).
+            </div>
+          )}
           {finding.dependency && (
             <div className="card">
               <h3 style={{ marginBottom: 8 }}>

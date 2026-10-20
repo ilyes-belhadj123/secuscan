@@ -8,6 +8,8 @@ import ast
 import textwrap
 from functools import lru_cache
 
+import tree_sitter_c_sharp
+import tree_sitter_go
 import tree_sitter_java
 import tree_sitter_javascript
 import tree_sitter_php
@@ -21,6 +23,8 @@ _GRAMMARS = {
     "java": tree_sitter_java.language,
     "php": tree_sitter_php.language_php,  # fichier complet : HTML + <?php ... ?>
     "php_only": tree_sitter_php.language_php_only,  # extrait sans balise d'ouverture
+    "csharp": tree_sitter_c_sharp.language,
+    "go": tree_sitter_go.language,
 }
 
 

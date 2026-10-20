@@ -2,6 +2,7 @@
 const path = require("path");
 const express = require("express");
 const axios = require("axios");
+const bcrypt = require("bcrypt");
 const jwt = require("jsonwebtoken");
 const escapeHtml = require("escape-html");
 const { User } = require("./models");
@@ -22,7 +23,8 @@ app.get("/avatar", async (req, res) => {
 
 app.post("/login", async (req, res) => {
   const user = await User.findOne({ email: String(req.body.email) });
-  res.json({ ok: Boolean(user) });
+  const ok = Boolean(user) && (await bcrypt.compare(String(req.body.password), user.passwordHash));
+  res.status(ok ? 200 : 401).json({ ok });
 });
 
 app.post("/preferences", (req, res) => {

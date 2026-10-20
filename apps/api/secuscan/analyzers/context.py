@@ -10,10 +10,14 @@ _FUNC_START = {
     ),
     "php": re.compile(r"^\s*((public|private|protected|static)\s+)*function\b|^\s*//|^\s*\$\w+\s*=\s*\$_"),
     "java": re.compile(r"^\s*(public|private|protected)\s+[\w<>\[\], ]+\s+\w+\s*\([^;]*$"),
+    "csharp": re.compile(r"^\s*\[(Http\w+|Route)|^\s*(public|private|protected|internal)\s+"
+                         r"(static\s+|async\s+|virtual\s+|override\s+)*[\w<>\[\], ?]+\s+\w+\s*\("),
+    "go": re.compile(r"^func\b"),
 }
 _FUNC_START["typescript"] = _FUNC_START["javascript"]
 
-_IMPORT = re.compile(r"^\s*(import\b|from\s+\S+\s+import\b|const\s+.*=\s*require\(|use\s+[\w\\]+;|package\b)")
+_IMPORT = re.compile(r"^\s*(import\b|from\s+\S+\s+import\b|const\s+.*=\s*require\(|use\s+[\w\\]+;|package\b"
+                     r"|using\s+[\w.]+;|namespace\b|\"[\w./-]+\"\s*$)")
 
 _CLOSING_ONLY = re.compile(r"^\s*[}\])]+[;,)]*\s*$")
 

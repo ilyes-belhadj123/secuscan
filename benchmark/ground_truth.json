@@ -328,7 +328,185 @@
             "cwe": "CWE-352"
           }
         ],
-        "java/ReportControllerSafe.java": []
+        "java/ReportControllerSafe.java": [],
+        "csharp/OrdersController.cs": [
+          {
+            "contains": "new SqlCommand(sql, _db)",
+            "cwe": "CWE-89"
+          },
+          {
+            "contains": "Process.Start(\"cmd.exe\", \"/c export.bat \" + format)",
+            "cwe": "CWE-78"
+          },
+          {
+            "contains": "ReadAllBytes(Path.Combine(\"/srv/invoices\", file))",
+            "cwe": "CWE-22"
+          },
+          {
+            "contains": "Http.GetStringAsync(url)",
+            "cwe": "CWE-918"
+          },
+          {
+            "contains": "formatter.Deserialize(Request.Body)",
+            "cwe": "CWE-502"
+          },
+          {
+            "contains": "XmlResolver = new XmlUrlResolver()",
+            "cwe": "CWE-611"
+          },
+          {
+            "contains": "=> Redirect(returnUrl)",
+            "cwe": "CWE-601"
+          },
+          {
+            "contains": "Content(\"<h1>Bonjour \" + name",
+            "cwe": "CWE-79"
+          },
+          {
+            "contains": "MD5.Create()",
+            "cwe": "CWE-328"
+          }
+        ],
+        "csharp/OrdersControllerSafe.cs": [],
+        "go/handlers.go": [
+          {
+            "contains": "db.Query(query)",
+            "cwe": "CWE-89"
+          },
+          {
+            "contains": "\"ping -c 1 \"+host",
+            "cwe": "CWE-78"
+          },
+          {
+            "contains": "os.ReadFile(filepath.Join(\"/srv/files\", file))",
+            "cwe": "CWE-22"
+          },
+          {
+            "contains": "http.Get(target)",
+            "cwe": "CWE-918"
+          },
+          {
+            "contains": "fmt.Fprintf(w, \"<h1>Bonjour %s</h1>\", name)",
+            "cwe": "CWE-79"
+          },
+          {
+            "contains": "r.URL.Query().Get(\"next\")",
+            "cwe": "CWE-601"
+          },
+          {
+            "contains": "md5.Sum(",
+            "cwe": "CWE-328"
+          },
+          {
+            "contains": "InsecureSkipVerify: true",
+            "cwe": "CWE-295"
+          }
+        ],
+        "go/handlers_safe.go": [],
+        "iac/vulnerable/Dockerfile": [
+          {
+            "contains": "FROM node:latest",
+            "cwe": "CWE-1104"
+          },
+          {
+            "contains": "ENV DATABASE_PASSWORD=",
+            "cwe": "CWE-798"
+          },
+          {
+            "contains": "ADD https://example.com/tools/agent.tar.gz",
+            "cwe": "CWE-494"
+          },
+          {
+            "contains": "install.sh | sh",
+            "cwe": "CWE-494"
+          },
+          {
+            "contains": "chmod -R 777 /app",
+            "cwe": "CWE-732"
+          },
+          {
+            "contains": "CMD [\"node\", \"server.js\"]",
+            "cwe": "CWE-250"
+          }
+        ],
+        "iac/safe/Dockerfile": [],
+        "iac/vulnerable/deployment.yaml": [
+          {
+            "contains": "hostNetwork: true",
+            "cwe": "CWE-668"
+          },
+          {
+            "contains": "image: acme/boutique:latest",
+            "cwe": "CWE-1104"
+          },
+          {
+            "contains": "privileged: true",
+            "cwe": "CWE-250"
+          },
+          {
+            "contains": "allowPrivilegeEscalation: true",
+            "cwe": "CWE-250"
+          },
+          {
+            "contains": "- SYS_ADMIN",
+            "cwe": "CWE-250"
+          },
+          {
+            "contains": "path: /var/run/docker.sock",
+            "cwe": "CWE-668"
+          },
+          {
+            "contains": "containers:",
+            "cwe": "CWE-770"
+          },
+          {
+            "contains": "containers:",
+            "cwe": "CWE-250"
+          }
+        ],
+        "iac/safe/deployment.yaml": [],
+        "iac/vulnerable/main.tf": [
+          {
+            "contains": "acl    = \"public-read\"",
+            "cwe": "CWE-732"
+          },
+          {
+            "contains": "cidr_blocks = [\"0.0.0.0/0\"]",
+            "cwe": "CWE-284"
+          },
+          {
+            "contains": "password            = \"Bench-Terraform-Pass-2024\"",
+            "cwe": "CWE-798"
+          },
+          {
+            "contains": "publicly_accessible = true",
+            "cwe": "CWE-284"
+          },
+          {
+            "contains": "storage_encrypted   = false",
+            "cwe": "CWE-311"
+          },
+          {
+            "contains": "Action   = \"*\"",
+            "cwe": "CWE-269"
+          }
+        ],
+        "iac/safe/main.tf": [],
+        "iac/vulnerable/docker-compose.yml": [
+          {
+            "contains": "privileged: true",
+            "cwe": "CWE-250"
+          },
+          {
+            "contains": "network_mode: host",
+            "cwe": "CWE-668"
+          },
+          {
+            "contains": "/var/run/docker.sock:/var/run/docker.sock",
+            "cwe": "CWE-668"
+          }
+        ],
+        "iac/safe/docker-compose.yml": []
       }
     },
     {

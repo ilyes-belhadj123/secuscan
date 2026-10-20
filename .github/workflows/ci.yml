@@ -47,6 +47,8 @@ jobs:
         working-directory: apps/api
     steps:
       - uses: actions/checkout@v4
+        with:
+          fetch-depth: 200  # historique : secrets supprimés du code mais encore dans les anciens commits
       - uses: astral-sh/setup-uv@v6
       - run: uv sync
       - name: Analyse SecuScan du dépôt

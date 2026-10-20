@@ -8,7 +8,7 @@ fichiers temporaires prévisibles, XML sans protection contre les entités exter
 import re
 
 from ..models import Severity
-from .rules import JS_LANGS, Rule
+from .rule_model import JS_LANGS, Rule
 
 C, H, M, L = Severity.critical, Severity.high, Severity.medium, Severity.low
 

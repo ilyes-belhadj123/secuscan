@@ -66,6 +66,9 @@ class Settings(BaseSettings):
     # l'origine de SECUSCAN_PUBLIC_URL est toujours ajoutée
     secuscan_allowed_origins: list[str] = ["http://127.0.0.1:5173", "http://localhost:5173"]
 
+    # Secrets dans l'historique Git : nombre de commits relus pour un dépôt cloné (0 : désactivé)
+    secuscan_history_commits: int = 200
+
     # SS-1 : « thread » = analyses dans le processus de l'API ; « worker » = file durable en base,
     # exécutée par un ou plusieurs processus `python -m secuscan.worker`
     secuscan_queue: Literal["thread", "worker"] = "thread"

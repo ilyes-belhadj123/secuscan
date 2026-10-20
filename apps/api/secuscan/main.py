@@ -223,7 +223,7 @@ def scan_git(body: GitRequest, ctx: Context = Depends(current_context), service:
 def scan_snippet(body: SnippetRequest, ctx: Context = Depends(current_context), service: ScanService = Depends(get_service)):
     filename = Path(body.filename.replace("\\", "/")).name
     if not language_for_filename(filename):
-        raise HTTPException(400, "Extension non supportée (.py, .js, .ts, .php, .java…).")
+        raise HTTPException(400, "Extension non supportée (.py, .js, .ts, .php, .java, .cs, .go…).")
     if not body.code.strip():
         raise HTTPException(400, "Le code est vide.")
     scan = _new_scan(service, ctx, project_name=body.project_name.strip() or "Extrait de code", source="snippet")

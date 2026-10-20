@@ -4,30 +4,11 @@ Chaque règle est un motif appliqué ligne par ligne. Les règles sont volontair
 larges : la couche IA se charge ensuite d'écarter les faux positifs.
 """
 import re
-from dataclasses import dataclass, field
 
 from ..models import Severity
+from .rule_model import JS_LANGS, Rule
 
-JS_LANGS = ("javascript", "typescript")
-
-
-@dataclass(frozen=True)
-class Rule:
-    id: str
-    languages: tuple[str, ...]
-    pattern: re.Pattern
-    title: str
-    cwe: str
-    severity: Severity
-    description: str
-    fix_hint: str
-    # Motif devant apparaître dans les lignes voisines (±3) pour déclencher la règle
-    context_requires: re.Pattern | None = None
-    # Motif qui, s'il est présent dans le fichier, désactive la règle (mitigation déjà en place)
-    file_excludes: re.Pattern | None = None
-    # Motif qui, s'il est présent sur la ligne, désactive la règle (ex. valeur échappée)
-    line_excludes: re.Pattern | None = None
-    tags: tuple[str, ...] = field(default_factory=tuple)
+__all__ = ["JS_LANGS", "RULES", "RULES_BY_ID", "Rule"]
 
 
 def _r(pattern: str, flags: int = 0) -> re.Pattern:
@@ -344,9 +325,11 @@ RULES: list[Rule] = [
 ]
 
 # Règles complémentaires (nouvelles familles) et métadonnées des alertes de flux (taint.py)
-from .rules_extra import EXTRA_RULES  # noqa: E402 — rules_extra importe Rule depuis ce module
+from .iac import FILE_RULES, IAC_RULES  # noqa: E402
+from .rules_dotnet_go import DOTNET_GO_RULES  # noqa: E402
+from .rules_extra import EXTRA_RULES  # noqa: E402 — règles complémentaires, après celles de ce fichier
 
-RULES += EXTRA_RULES
+RULES += EXTRA_RULES + DOTNET_GO_RULES + IAC_RULES
 
 _NEVER = re.compile(r"(?!)")  # les alertes de flux ne viennent pas d'un motif de ligne
 _FLOW_FIX = {
@@ -360,7 +343,8 @@ _FLOW_FIX = {
     "redirect": "Rediriger vers une liste d'adresses autorisées, ou uniquement vers des chemins relatifs du site.",
     "lfi": "Choisir le fichier dans une liste blanche (in_array($page, $autorises, true)), jamais d'après la saisie.",
 }
-_FLOW_PREFIXES = {"PY": ("python",), "JS": JS_LANGS, "PHP": ("php",), "JAVA": ("java",)}
+_FLOW_PREFIXES = {"PY": ("python",), "JS": JS_LANGS, "PHP": ("php",), "JAVA": ("java",), "CS": ("csharp",),
+                  "GO": ("go",)}
 _FLOW_SUFFIXES = {"SQLI-FLOW": "sql", "XSS-FLOW": "xss", "CMDI-FLOW": "cmd", "SSRF": "ssrf",
                   "PATH-FLOW": "path", "REDIRECT-FLOW": "redirect", "LFI-FLOW": "lfi"}
 _FLOW_META = {
@@ -377,4 +361,4 @@ FLOW_RULES = [
     for prefix, langs in _FLOW_PREFIXES.items() for suffix, kind in _FLOW_SUFFIXES.items()
 ]
 
-RULES_BY_ID = {rule.id: rule for rule in RULES + FLOW_RULES}
+RULES_BY_ID = {rule.id: rule for rule in RULES + FLOW_RULES + list(FILE_RULES.values())}

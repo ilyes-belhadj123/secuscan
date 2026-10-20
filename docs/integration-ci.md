@@ -17,6 +17,24 @@ uv run python -m secuscan.cli scan CHEMIN [--fail-on high] [--format text|json|s
 | `--ai` | Active l'IA (validation des faux positifs, explications, correctifs) : nécessite `OPENROUTER_API_KEY` et consomme des crédits |
 | `--offline` | Aucun appel réseau : les dépendances ne sont vérifiées que si elles sont déjà en cache |
 | `--pr-comment` | Commente la pull request (GitHub) ou la merge request (GitLab) : voir plus bas |
+| `--no-history` | Ne pas chercher de secrets dans l'historique Git (activé par défaut si le dossier est un dépôt Git) |
+
+## Secrets dans l'historique Git
+
+Un secret supprimé du code reste lisible dans les anciens commits. Quand le dossier analysé est un
+dépôt Git, SecuScan relit les lignes ajoutées par les 200 derniers commits (`SECUSCAN_HISTORY_COMMITS`)
+et signale les secrets qui n'apparaissent plus dans la version actuelle. Seuls l'identifiant court du
+commit et sa date sont conservés (ni auteur, ni message).
+
+En CI, le dépôt est souvent récupéré sans historique : demandez-le explicitement.
+
+```yaml
+    - uses: actions/checkout@v4
+      with:
+        fetch-depth: 200   # 0 = tout l'historique
+```
+
+Clé `.secuscan.yml` équivalente à `--no-history` : `history: false`.
 
 ## Codes retour
 

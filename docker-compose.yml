@@ -5,7 +5,7 @@
 
 x-app: &app
   build: .
-  image: secuscan
+  image: secuscan:${SECUSCAN_VERSION:-local}
   restart: unless-stopped
   # Secrets (clé OpenRouter, SMTP, OAuth, Stripe…) : fichier lu au démarrage, jamais dans l'image
   env_file:
@@ -39,7 +39,7 @@ services:
   # Analyse statique isolée : aucun réseau, aucun secret, système de fichiers en lecture seule,
   # aucun privilège ; ne voit que le dossier des analyses (pas la base de données)
   sandbox:
-    image: secuscan
+    image: secuscan:${SECUSCAN_VERSION:-local}
     restart: unless-stopped
     depends_on: [secuscan]
     command: ["python", "-m", "secuscan.sandbox", "serve", "/data/work/.sandbox",

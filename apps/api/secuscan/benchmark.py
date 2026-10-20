@@ -17,7 +17,7 @@ from datetime import UTC, datetime
 from pathlib import Path
 
 from .config import REPO_ROOT, Settings, get_settings
-from .ingest import LANGUAGE_BY_EXTENSION
+from .ingest import LANGUAGE_BY_EXTENSION, iac_kind
 from .models import Finding, Scan
 from .pipeline import ScanService, new_id
 from .storage import Storage
@@ -54,7 +54,10 @@ class Expected:
 
     @property
     def language(self) -> str:
-        return LANGUAGE_BY_EXTENSION.get(Path(self.file).suffix, "?")
+        name = Path(self.file).name
+        if name.endswith((".yaml", ".yml")) and not iac_kind(name):
+            return "kubernetes"
+        return LANGUAGE_BY_EXTENSION.get(Path(self.file).suffix) or iac_kind(name) or "?"
 
 
 @dataclass
