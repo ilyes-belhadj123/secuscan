@@ -50,7 +50,9 @@ SECRET_PATTERNS = [
     ),
 ]
 
-_PLACEHOLDERS = re.compile(r"(?i)^(changeme|password|secret|x{4,}|\*{4,}|your[_-]|<|\$\{|\{\{|%\(|process\.env|os\.environ)")
+# Valeurs factices, gabarits et variables interpolées (« password = '$pass_new' » en PHP)
+_PLACEHOLDERS = re.compile(r"(?i)^(changeme|password|secret|x{4,}|\*{4,}|your[_-]|<|\$\{|\{\{|%\(|process\.env|os\.environ"
+                           r"|\{?\$[a-z_]\w*(\[[^\]]*\])?\}?$)")
 
 
 def fingerprint(value: str) -> str:

@@ -171,17 +171,24 @@ def _read_text(path: Path) -> str | None:
 _MINIFIED_NAME = re.compile(r"[.-]min\.(js|mjs|cjs)$|\.bundle\.js$|\.chunk\.js$", re.I)
 _VERSION = re.compile(r"\bv?\d+\.\d+")
 _LICENSE = re.compile(r"@license|\(c\)|copyright|licensed under|\bMIT\b", re.I)
+# Dossiers de dépendances recopiées (pas « lib/ » : c'est souvent le code du projet, en Node.js)
+_VENDOR_DIR = re.compile(r"/(vendors?|libs|third[-_]?party|bower_components|jspm_packages)/", re.I)
 
 
 def is_vendored(rel_path: str, content: str) -> bool:
-    """Fichier minifié, ou bibliothèque tierce reconnaissable à son bandeau (version + licence)."""
+    """Fichier minifié, bibliothèque rangée dans un dossier de dépendances recopiées, ou reconnaissable
+    à son bandeau (version + licence)."""
     if _MINIFIED_NAME.search(rel_path):
         return True
     if not rel_path.endswith((".js", ".mjs", ".cjs")):
         return False
-    head = content.lstrip()[:800]
-    if head.startswith("/*"):
-        banner = head.split("*/", 1)[0]
+    if _VENDOR_DIR.search("/" + rel_path):
+        return True
+    # Bandeau en tête de fichier, éventuellement après une ou deux lignes (« var $ = require(…) »)
+    head = content.lstrip()[:1200]
+    start = head.find("/*")
+    if 0 <= start < 400:
+        banner = head[start:].split("*/", 1)[0]
         if _VERSION.search(banner) and _LICENSE.search(banner):
             return True
     lines = content.split("\n", 200)[:200]

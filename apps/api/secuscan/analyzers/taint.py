@@ -50,6 +50,8 @@ class CallHit:
 
 
 _CALL = re.compile(r"([A-Za-z_$][\w$]*)\s*\(")
+# Nom de la fonction définie sur une ligne de début de fonction (ce n'est pas un appel)
+_DEFINED_NAME = re.compile(r"(?:\bdef|\bfunction|\bfunc(?:\s*\([^)]*\))?|[\w<>\[\],?]+)\s+(\w+)\s*\(")
 
 
 @dataclass(frozen=True)
@@ -94,7 +96,8 @@ SANITIZERS = {
                      r"escape|validator\.escape|path\.basename|DOMPurify\.sanitize|sanitizeHtml|he\.encode)"
                      r"\((?:[^()]|\([^()]*\))*\)"),
     "php": _r(r"\b(intval|floatval|boolval|htmlspecialchars|htmlentities|strip_tags|escapeshellarg|"
-              r"escapeshellcmd|basename|urlencode|rawurlencode|filter_var|mysqli_real_escape_string)\((?:[^()]|\([^()]*\))*\)"
+              r"escapeshellcmd|basename|urlencode|rawurlencode|filter_var|mysqli_real_escape_string|md5|sha1|hash|crc32)"
+              r"\s*\((?:[^()]|\([^()]*\))*\)"
               r"|\$\w+->(quote|real_escape_string)\((?:[^()]|\([^()]*\))*\)|\(int\)\s*\$\w+"),
     "java": _r(r"\b(Integer\.parseInt|Long\.parseLong|Integer\.valueOf|Long\.valueOf|UUID\.fromString|"
                r"URLEncoder\.encode|Encode\.forHtml\w*|HtmlUtils\.htmlEscape|StringEscapeUtils\.escapeHtml4|"
@@ -126,6 +129,7 @@ SINKS: dict[str, list[Sink]] = {
         Sink("JS-SQLI-FLOW", "sql", _r(r"\.(query|execute|raw)\(|\.\$queryRawUnsafe\(")),
         Sink("JS-CMDI-FLOW", "cmd", _r(r"\b(exec|execSync)\(|child_process\.exec\w*\(")),
         Sink("JS-SSRF", "ssrf", _r(r"\b(fetch|got|needle)\(|\baxios(\.(get|post|put|delete|patch|request))?\("
+                                   r"|\b(needle|got|superagent|request)\.(get|post|put|delete|patch|head|request)\("
                                    r"|\bhttps?\.(get|request)\(")),
         Sink("JS-PATH-FLOW", "path", _r(r"\bfs\.(readFile|readFileSync|createReadStream|writeFile|unlink)\w*\("
                                         r"|\bres\.(sendFile|download)\(")),
@@ -134,33 +138,55 @@ SINKS: dict[str, list[Sink]] = {
                                       r"|insertAdjacentHTML\("), first_arg=False),
     ],
     "php": [
-        Sink("PHP-SQLI-FLOW", "sql", _r(r"\b(mysqli_query|pg_query)\(\s*\$\w+\s*,|->(query|exec|multi_query)\(")),
+        Sink("PHP-SQLI-FLOW", "sql", _r(r"\b(mysqli_query|pg_query)\(\s*\$\w+(\[[^\]]*\])?\s*,"
+                                        r"|->(query|exec|multi_query)\(")),
         Sink("PHP-CMDI-FLOW", "cmd", _r(r"(?<![$\w>])(system|exec|shell_exec|passthru|popen|proc_open)\(")),
-        Sink("PHP-SSRF", "ssrf", _r(r"(?<![$\w>])(file_get_contents|curl_init|fopen|get_headers)\(")),
+        Sink("PHP-SSRF", "ssrf", _r(r"(?<![$\w>])(curl_init|get_headers)\(|(?<![$\w>])(file_get_contents|fopen)\("
+                                    r"(?!\s*([\"']php://|__DIR__|[A-Z][A-Z0-9_]+\b|[\"'](?![a-z]+://)))")),
+        Sink("PHP-PATH-FLOW", "path", _r(r"(?<![$\w>])(file_get_contents|fopen)\("
+                                         r"(?=\s*(__DIR__|[A-Z][A-Z0-9_]+\b|[\"'](?![a-z]+://|php://)))")),
         Sink("PHP-LFI-FLOW", "lfi", _r(r"(?<![$\w>])(include|include_once|require|require_once)\b\s*\(?"),
              first_arg=False),
         Sink("PHP-PATH-FLOW", "path", _r(r"(?<![$\w>])(readfile|unlink|file)\(")),
-        Sink("PHP-REDIRECT-FLOW", "redirect", _r(r"\bheader\(\s*[\"']Location:"), first_arg=False),
+        Sink("PHP-REDIRECT-FLOW", "redirect", _r(r"(?i)\bheader\s*\(\s*[\"']Location\s*:"), first_arg=False),
         Sink("PHP-XSS-FLOW", "xss", _r(r"^\s*(echo|print)\b|<\?=|\bprintf\("), first_arg=False),
+        # Balise concaténée (« '<pre>' . $x », « $x . '</pre>' ») ou interpolée (« "<pre>{$x}" ») ;
+        # pas une balise passée en argument (« str_replace('<script>', '', $x) »)
+        Sink("PHP-XSS-FLOW", "xss", _r(r"^\s*\$\w+\s*\.?=(?![=>])(?=[^;]*("
+                                      r"[\"'][^\"']*</?[a-zA-Z][\w-]*[\s>/][^\"']*[\"']\s*\."
+                                      r"|\.\s*[\"'][^\"']*</?[a-zA-Z][\w-]*[\s>/]"
+                                      r"|\"[^\"]*</?[a-zA-Z][\w-]*[\s>/][^\"]*\$))"), first_arg=False),
     ],
     "java": [
         Sink("JAVA-SQLI-FLOW", "sql", _r(r"\.(executeQuery|executeUpdate|execute|addBatch|prepareStatement|"
                                          r"createQuery|createNativeQuery)\(")),
         Sink("JAVA-CMDI-FLOW", "cmd", _r(r"\.exec\(|new\s+ProcessBuilder\(")),
         Sink("JAVA-SSRF", "ssrf", _r(r"new\s+URL\(|URI\.create\(|\.(getForObject|getForEntity)\(")),
-        Sink("JAVA-PATH-FLOW", "path", _r(r"new\s+(File|FileInputStream|FileReader|FileOutputStream)\(|Paths\.get\(")),
+        # new File(dossier, nom), Paths.get(base, nom) : le nom est souvent le 2e argument
+        Sink("JAVA-PATH-FLOW", "path", _r(r"new\s+(File|FileInputStream|FileReader|FileOutputStream)\(|Paths\.get\(|"
+                                          r"Path\.of\("), first_arg=False),
         Sink("JAVA-REDIRECT-FLOW", "redirect", _r(r"\.sendRedirect\(")),
+        # Spring MVC : « new ModelAndView("redirect:" + url) », « return "redirect:" + url; »
+        Sink("JAVA-REDIRECT-FLOW", "redirect", _r(r"(new\s+(ModelAndView|RedirectView)\(|\breturn\s+)(?=\"redirect:)"
+                                                  r"|new\s+RedirectView\("), first_arg=False),
         Sink("JAVA-XSS-FLOW", "xss", _r(r"\.getWriter\(\)\.(print|println|write)\("), first_arg=False),
     ],
 }
 
 # Chaînes sans interpolation, retirées avant de chercher des noms de variables (« name » dans un texte)
+# Les chaînes qui interpolent (groupe « keep ») sont reconnues d'abord et conservées telles quelles :
+# « "… WHERE id = '$id'" » (PHP), f"… '{uid}'" (Python), `… '${id}'` (JavaScript) gardent leur variable.
+_DQ, _SQ = r"\"(?:[^\"\\]|\\.)*\"", r"'(?:[^'\\]|\\.)*'"
 _PLAIN_STRINGS = {
-    "python": _r(r"(?<![fF\w])(\"(?:[^\"\\]|\\.)*\"|'(?:[^'\\]|\\.)*')"),
-    "javascript": _r(r"\"(?:[^\"\\]|\\.)*\"|'(?:[^'\\]|\\.)*'"),
-    "php": _r(r"'(?:[^'\\]|\\.)*'"),  # les guillemets doubles interpolent les variables
-    "java": _r(r"\"(?:[^\"\\]|\\.)*\""),
+    "python": _r(rf"(?P<keep>(?<!\w)(?:[fF][rRbB]?|[rRbB][fF])(?:{_DQ}|{_SQ}))|(?<!\w)[rRbBuU]{{0,2}}(?:{_DQ}|{_SQ})"),
+    "javascript": _r(rf"(?P<keep>`(?:[^`\\]|\\.)*`)|{_DQ}|{_SQ}"),
+    "php": _r(rf"(?P<keep>{_DQ})|{_SQ}"),  # les guillemets doubles interpolent les variables
+    "java": _r(_DQ),
 }
+
+
+def _strip_plain_strings(pattern: re.Pattern, expr: str) -> str:
+    return pattern.sub(lambda m: m.group(0) if m.groupdict().get("keep") else '""', expr)
 # Début d'une fonction ou d'une route : les variables suivies repartent de zéro
 _FUNCTION_START = {
     "python": _r(r"^\s*(async\s+)?def\s"),
@@ -171,8 +197,10 @@ _FUNCTION_START = {
                r"(throws\s+[\w., ]+)?\s*\{?\s*$"),
 }
 # Paramètres reçus du client par annotation (Spring) : teintés dès la signature
+# Le type n'est pas numérique, booléen, UUID ou date : une telle valeur ne peut pas porter de texte
 _ANNOTATED_PARAM = _r(r"@(RequestParam|PathVariable|RequestBody|RequestHeader)(\([^)]*\))?\s+(final\s+)?"
-                      r"[\w<>\[\]]+\s+(\w+)")
+                      r"(?!(?:int|long|short|byte|double|float|boolean|Integer|Long|Short|Byte|Double|Float|Boolean"
+                      r"|BigDecimal|BigInteger|UUID|LocalDate|LocalDateTime|Instant)\s)[\w<>\[\]]+\s+(\w+)")
 # ---------------------------------------------------------------------- C# (ASP.NET Core) et Go
 SOURCES["csharp"] = _r(r"\bRequest\.(Query|Form|Body|Headers|Cookies|RouteValues)\b|HttpContext\.Request\.")
 SOURCES["go"] = _r(r"\br\.URL\.Query\(\)|\br\.(FormValue|PostFormValue)\(|\br\.(Form|PostForm|Body)\b|"
@@ -210,7 +238,7 @@ SINKS["go"] = [
     Sink("GO-XSS-FLOW", "xss", _r(r"\bfmt\.Fprint(f|ln)?\(\s*w\s*,|\bw\.Write\(|\bio\.WriteString\(\s*w\s*,"
                                   r"|\btemplate\.HTML\("), first_arg=False),
 ]
-_PLAIN_STRINGS["csharp"] = _r(r"(?<![$\w])@?\"(?:[^\"\\]|\\.)*\"")  # $"…" interpole, les autres non
+_PLAIN_STRINGS["csharp"] = _r(r"(?P<keep>\$@?\"(?:[^\"\\]|\\.)*\")|@?\"(?:[^\"\\]|\\.)*\"")  # $"…" interpole
 _PLAIN_STRINGS["go"] = _r(r"\"(?:[^\"\\]|\\.)*\"|`[^`]*`")
 _FUNCTION_START["csharp"] = _r(r"^(?!\s*(try|if|for|foreach|while|switch|catch|using|lock|return)\b)"
                                r"\s*(public|private|protected|internal)\s+(static\s+|async\s+|virtual\s+|override\s+)*"
@@ -285,7 +313,7 @@ class _Tainted:
             previous, expr = expr, SANITIZERS[self.language].sub("0", expr)
         if SOURCES[self.language].search(expr):
             return ("entrée utilisateur", line_no)
-        expr = _PLAIN_STRINGS[self.language].sub('""', expr)
+        expr = _strip_plain_strings(_PLAIN_STRINGS[self.language], expr)
         for name, origin in self.vars.items():
             if self._pattern(name).search(expr):
                 return (name, origin)
@@ -305,11 +333,19 @@ def find_flows(source: SourceFile, initial: dict[str, int] | None = None, first_
     tainted.vars.update(initial or {})
     findings: list[FlowFinding] = []
     controller = language == "csharp" and bool(_CS_CONTROLLER.search(source.content))
+    scope_indent = -1  # indentation du dernier début de fonction
     for idx, line in enumerate(source.content.split("\n"), start=first_line):
         if not line.strip() or _COMMENT.match(line):
             continue
+        defined = None
         if _FUNCTION_START[language].search(line):
-            tainted.vars.clear()
+            defined = (m.group(1) if (m := _DEFINED_NAME.search(line)) else None)
+            indent = len(line) - len(line.lstrip())
+            # Fonction imbriquée (callback, closure) : elle voit les variables de la fonction qui
+            # l'entoure ; une fonction voisine ou de niveau supérieur repart de zéro
+            if scope_indent < 0 or indent <= scope_indent:
+                tainted.vars.clear()
+            scope_indent = indent
             if language == "java":
                 for m in _ANNOTATED_PARAM.finditer(line):
                     tainted.vars[m.group(4)] = idx
@@ -329,6 +365,8 @@ def find_flows(source: SourceFile, initial: dict[str, int] | None = None, first_
                 break  # une alerte de flux par ligne
         if summaries and call_hits is not None:
             for call in _CALL.finditer(line):
+                if call.group(1) == defined:
+                    continue
                 for param_sink in summaries.get(call.group(1), ()):
                     args = split_arguments(line[call.end():])
                     if param_sink.param < len(args) and (hit := tainted.first_hit(args[param_sink.param], idx)):

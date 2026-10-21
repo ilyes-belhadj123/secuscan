@@ -184,7 +184,9 @@ RULES: list[Rule] = [
     # --------------------------------------------------------------------- PHP
     Rule(
         "PHP-SQLI", ("php",),
-        _r(r"(mysqli_query|mysql_query|pg_query|->query|->exec)\s*\([^;]*(\.\s*\$|\$_(GET|POST|REQUEST|COOKIE)|\"[^\"]*\$\w+)"),
+        # Guillemet ouvrant (après « ( , . = ») : pas celui qui ferme « $GLOBALS["db"] » avant « , $query »
+        _r(r"(mysqli_query|mysql_query|pg_query|->query|->exec)\s*\([^;]*(\.\s*\$|\$_(GET|POST|REQUEST|COOKIE)"
+           r"|[(,.=]\s*\"[^\"]*\$\w+)"),
         "Injection SQL", "CWE-89", C,
         "La requête SQL concatène des variables PHP.",
         "Utiliser PDO ou mysqli avec requêtes préparées (prepare + bind_param).",
@@ -226,6 +228,19 @@ RULES: list[Rule] = [
         "Inclusion de fichier dynamique", "CWE-98", C,
         "Le fichier inclus dépend d'une variable : inclusion de fichiers arbitraires possible.",
         "Utiliser une table de correspondance fixe (liste blanche) des modules autorisés.",
+    ),
+    Rule(
+        # Fichier déposé sous le nom choisi par l'utilisateur, sans liste d'extensions ni nom aléatoire
+        "PHP-UPLOAD", ("php",),
+        _r(r"\bmove_uploaded_file\s*\("),
+        "Dépôt de fichier sans restriction", "CWE-434", H,
+        "Le fichier envoyé est enregistré sous le nom fourni par le client, sans contrôle de son extension : "
+        "un script .php déposé dans un dossier public serait exécuté par le serveur.",
+        "Vérifier l'extension avec une liste blanche (in_array(strtolower($ext), ['jpg', 'png'], true)), "
+        "renommer le fichier (bin2hex(random_bytes(16))) et le stocker hors de la racine web.",
+        file_excludes=_r(r"random_bytes|uniqid\s*\(|\bhash\s*\(|in_array\s*\([^)]*ext|strtolower\s*\(\s*\$\w*ext"
+                         r"|pathinfo\s*\([^)]*PATHINFO_EXTENSION"),
+        file_requires=_r(r"\$_FILES\s*\[[^\]]+\]\s*\[\s*['\"]name['\"]\s*\]"),
     ),
     Rule(
         "PHP-DESER", ("php",),

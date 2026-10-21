@@ -7,9 +7,10 @@ from secuscan.training import grade
 from secuscan.training_exercises import EXERCISES, EXERCISES_BY_ID
 
 
-def test_catalog_has_ten_exercises_in_four_languages():
-    assert len(EXERCISES) == 10 and len(EXERCISES_BY_ID) == 10
-    assert {e.language for e in EXERCISES} == {"python", "javascript", "php", "java"}
+def test_catalog_covers_languages_and_infrastructure():
+    assert len(EXERCISES) == 18 and len(EXERCISES_BY_ID) == 18
+    assert {e.language for e in EXERCISES} == {"python", "javascript", "php", "java", "csharp", "go",
+                                                "dockerfile", "kubernetes"}
 
 
 @pytest.mark.parametrize("ex", EXERCISES, ids=lambda e: e.id)
@@ -33,7 +34,7 @@ def test_cheating_is_rejected():
 def test_submission_flow_and_progress(api):
     client = register(api(), "jane.doe@example.com")
     listing = client.get("/api/training/exercises").json()
-    assert listing["total"] == 10 and listing["passed"] == 0
+    assert listing["total"] == len(EXERCISES) and listing["passed"] == 0
 
     ex = EXERCISES_BY_ID["js-xss"]
     detail = client.get("/api/training/exercises/js-xss").json()
@@ -74,3 +75,10 @@ def test_ai_review_confirms_or_rejects(api, service, monkeypatch, fixed, expecte
     result = client.post("/api/training/exercises/js-xss/submit",
                          json={"code": EXERCISES_BY_ID["js-xss"].solution}).json()
     assert result["passed"] is expected and result["ai"]["feedback"].startswith("Bien vu")
+
+
+def test_broken_yaml_is_rejected():
+    ex = EXERCISES_BY_ID["k8s-hardening"]
+    broken = ex.solution.replace("  replicas: 2", "  replicas: [2")
+    syntax = next(c for c in grade(ex, broken) if c.label == "Syntaxe valide")
+    assert not syntax.ok and "ligne" in syntax.detail

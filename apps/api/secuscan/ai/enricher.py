@@ -371,13 +371,18 @@ class Enricher:
         )
 
     # ------------------------------------------------------------------ failles logiques
-    def discover_logic_flaws(self, source: SourceFile, flagged_lines: list[int]) -> list[LogicFlaw]:
-        """Revue d'un fichier complet : failles que les règles par motif ne couvrent pas."""
+    def discover_logic_flaws(self, source: SourceFile, flagged_lines: list[int], first: int = 1,
+                             last: int | None = None) -> list[LogicFlaw]:
+        """Revue d'un fichier (ou d'une tranche first..last d'un grand fichier) : failles que les règles
+        par motif ne couvrent pas. Les numéros de ligne restent ceux du fichier."""
         lines = source.content.split("\n")
-        numbered = "\n".join(f"{i:>4} | {line}" for i, line in enumerate(lines, start=1))
+        last = min(last or len(lines), len(lines))
+        numbered = "\n".join(f"{i:>4} | {lines[i - 1]}" for i in range(first, last + 1))
+        label = source.path if (first, last) == (1, len(lines)) else \
+            f"{source.path} (extrait : lignes {first} à {last} sur {len(lines)})"
         prompt = LOGIC_TEMPLATE.format(
-            file=source.path, language=source.language, numbered=numbered,
-            flagged=", ".join(map(str, sorted(set(flagged_lines)))) or "aucune",
+            file=label, language=source.language, numbered=numbered,
+            flagged=", ".join(map(str, sorted({n for n in flagged_lines if first <= n <= last}))) or "aucune",
         )
         data = self._complete(prompt)
         flaws = []
@@ -390,7 +395,7 @@ class Enricher:
             except (KeyError, TypeError, ValueError):
                 continue
             cwe = str(item.get("cwe", "")).upper()
-            if not (1 <= start <= len(lines)) or confidence < LOGIC_MIN_CONFIDENCE:
+            if not (first <= start <= last) or confidence < LOGIC_MIN_CONFIDENCE:
                 continue
             title, _ = sanitize(str(item.get("title") or "Faille logique").strip())
             message, _ = sanitize(str(item.get("message") or "").strip())

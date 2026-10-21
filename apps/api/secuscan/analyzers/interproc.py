@@ -17,6 +17,7 @@ import re
 from dataclasses import dataclass
 
 from ..ingest import SourceFile
+from .comments import without_block_comments
 from .taint import KINDS, SINKS, CallHit, ParamSink, find_flows, split_arguments
 
 MAX_ROUNDS = 4
@@ -120,39 +121,64 @@ class CrossFlow:
     source_line: int
 
 
-def _trackable(functions: list[Function]) -> dict[tuple[str, str], Function]:
-    by_name: dict[tuple[str, str], list[Function]] = {}
-    for f in functions:
-        family = _FAMILY.get(f.source.language, f.source.language)
-        by_name.setdefault((family, f.name), []).append(f)
-    return {key: defs[0] for key, defs in by_name.items()
-            if len(defs) == 1 and len(key[1]) >= 4 and key[1].lower() not in _GENERIC}
+def _distinctive(name: str) -> bool:
+    return len(name) >= 4 and name.lower() not in _GENERIC
+
+
+class _Resolver:
+    """Fonction appelée par un nom : d'abord celle du même fichier (méthode de la même classe), sinon
+    l'unique définition du projet portant ce nom (par famille de langages)."""
+
+    def __init__(self, functions: list[Function]):
+        by_file: dict[tuple[str, str], list[Function]] = {}
+        by_name: dict[tuple[str, str], list[Function]] = {}
+        for f in functions:
+            if not _distinctive(f.name):
+                continue
+            by_file.setdefault((f.source.path, f.name), []).append(f)
+            by_name.setdefault((_FAMILY.get(f.source.language, f.source.language), f.name), []).append(f)
+        # Surcharges dans un même fichier : ambiguës, ignorées
+        self.local = {key: defs[0] for key, defs in by_file.items() if len(defs) == 1}
+        self.unique = {key: defs[0] for key, defs in by_name.items() if len(defs) == 1}
+        self.functions = list(self.local.values())
+        # (fichier, nom) → résumés ; listes créées d'avance et complétées sur place (vues mises en cache)
+        self.summaries: dict[tuple[str, str], list[ParamSink]] = {key: [] for key in self.local}
+        self._views: dict[str, dict[str, list[ParamSink]]] = {}
+        self._local_names: dict[str, list[str]] = {}
+        for path, name in self.local:
+            self._local_names.setdefault(path, []).append(name)
+
+    def table(self, source: SourceFile) -> dict[str, list[ParamSink]]:
+        """Résumés visibles depuis un fichier, par nom de fonction appelée."""
+        if source.path not in self._views:
+            family = _FAMILY.get(source.language, source.language)
+            view = {name: self.summaries[(fn.source.path, name)]
+                    for (fam, name), fn in self.unique.items() if fam == family}
+            view.update({name: self.summaries[(source.path, name)] for name in self._local_names.get(source.path, ())})
+            self._views[source.path] = view
+        return self._views[source.path]
 
 
 def cross_file_flows(code_files: list[SourceFile]) -> list[CrossFlow]:
-    files = [s for s in code_files if s.language in SINKS]
-    functions = _trackable([f for s in files for f in extract_functions(s)])
-    summaries: dict[str, dict[str, list[ParamSink]]] = {}  # famille → nom → résumés
-
-    def table(language: str) -> dict[str, list[ParamSink]]:
-        return summaries.setdefault(_FAMILY.get(language, language), {})
+    files = [without_block_comments(s) for s in code_files if s.language in SINKS]
+    resolver = _Resolver([f for s in files for f in extract_functions(s)])
 
     # 1-2. Résumés, propagés jusqu'à stabilité (A → B → C)
     for _ in range(MAX_ROUNDS):
         changed = False
-        for (_family, name), fn in functions.items():
+        for fn in resolver.functions:
             initial = {p: -(i + 1) for i, p in enumerate(fn.params) if p}
             if not initial:
                 continue
             body = SourceFile(fn.source.path, fn.source.language, fn.body)
             hits: list[CallHit] = []
             flows = find_flows(body, initial=initial, first_line=fn.first_line,
-                               summaries=table(fn.source.language), call_hits=hits)
-            found = [ParamSink(-f.source_line - 1, f.rule_id, f.kind, fn.source.path, f.line, name)
+                               summaries=resolver.table(fn.source), call_hits=hits)
+            found = [ParamSink(-f.source_line - 1, f.rule_id, f.kind, fn.source.path, f.line, fn.name)
                      for f in flows if f.source_line < 0]
-            found += [ParamSink(-h.origin - 1, h.sink.rule_id, h.sink.kind, h.sink.file, h.sink.line, name)
-                      for h in hits if h.origin < 0 and h.sink.function != name]
-            current = table(fn.source.language).setdefault(name, [])
+            found += [ParamSink(-h.origin - 1, h.sink.rule_id, h.sink.kind, h.sink.file, h.sink.line, fn.name)
+                      for h in hits if h.origin < 0 and h.sink.function != fn.name]
+            current = resolver.summaries.setdefault((fn.source.path, fn.name), [])
             for sink in found:
                 if sink not in current:
                     current.append(sink)
@@ -164,7 +190,7 @@ def cross_file_flows(code_files: list[SourceFile]) -> list[CrossFlow]:
     results: dict[tuple[str, int, str], CrossFlow] = {}
     for source in files:
         hits = []
-        find_flows(source, summaries=table(source.language), call_hits=hits)
+        find_flows(source, summaries=resolver.table(source), call_hits=hits)
         for h in hits:
             if h.origin > 0:
                 results.setdefault((h.sink.file, h.sink.line, h.sink.kind),

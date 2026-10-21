@@ -58,6 +58,23 @@ compilée) et affiche la liste des problèmes dans les journaux.
 **Premier compte** : la première organisation créée est celle du propriétaire de l'installation
 (offre Business, accès à l'écran « Paramètres »). Créez-la vous-même avant d'ouvrir l'accès.
 
+### Option : un conteneur jetable par analyse
+
+Par défaut, un seul conteneur `sandbox` lit le code de toutes les analyses. Pour une isolation
+maximale, chaque analyse peut avoir **son propre conteneur**, créé par le worker puis détruit :
+sans réseau, en lecture seule, sans privilèges, et qui ne voit **que le dossier de cette analyse**
+(une analyse ne peut ni lire ni modifier le code d'une autre).
+
+```bash
+DOCKER_GID=$(stat -c %g /var/run/docker.sock) SECUSCAN_DOMAIN=secuscan.example.com   docker compose -f docker-compose.yml -f docker-compose.ephemeral.yml up -d --build
+```
+
+Prérequis : Docker Engine 26 ou plus. Contrepartie : le worker accède au moteur Docker (socket
+`/var/run/docker.sock`), ce qui revient à des droits élevés sur le serveur s'il était compromis. Le
+worker détient déjà les secrets et le réseau ; préférez [Docker sans root](https://docs.docker.com/engine/security/rootless/)
+sur le serveur pour limiter ce risque. Worker lancé directement sur le serveur (hors conteneur) :
+`SECUSCAN_SANDBOX=ephemeral` suffit, le dossier de l'analyse est monté directement.
+
 ## 4. Ce que la mise en ligne protège
 
 - HTTPS de bout en bout côté navigateur, certificat renouvelé automatiquement par Caddy ;

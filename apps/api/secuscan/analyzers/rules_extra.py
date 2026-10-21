@@ -129,4 +129,38 @@ EXTRA_RULES: list[Rule] = [
         file_excludes=_r(r"defusedxml"),
         line_excludes=_r(r"parser\s*=\s*\w+"),
     ),
+    # ------------------------------------------------------------------ gabarits et expressions régulières
+    Rule(
+        "JS-TEMPLATE-NOESCAPE", JS_LANGS,
+        _r(r"\bautoescape\s*:\s*false\b|\bnoEscape\s*:\s*true\b"),
+        "Échappement automatique des gabarits désactivé", "CWE-79", H,
+        "Le moteur de gabarits (Swig, Nunjucks, Handlebars) insère les variables sans les échapper : toute "
+        "donnée affichée dans une page devient une XSS potentielle.",
+        "Laisser l'échappement automatique activé (valeur par défaut) et n'insérer du HTML brut "
+        "qu'explicitement, après nettoyage.",
+    ),
+    Rule(
+        "PY-TEMPLATE-NOESCAPE", ("python",),
+        _r(r"\bautoescape\s*=\s*False\b"),
+        "Échappement automatique des gabarits désactivé", "CWE-79", H,
+        "Jinja2 insère les variables sans les échapper : toute donnée affichée devient une XSS potentielle.",
+        "Activer l'échappement : Environment(autoescape=select_autoescape()) ; le marquage |safe reste "
+        "réservé à du HTML déjà nettoyé.",
+    ),
+    Rule(
+        # Groupe répété dont le contenu est une classe répétée suivie d'éléments facultatifs :
+        # « ([0-9]+)+ », « (\w+\s?)* », « ([a-z]*-?)+ » (une même chaîne se découpe de multiples façons).
+        # « (\.\d+)* », « (/[\w.]+)+ » commencent par un séparateur fixe : sans ambiguïté, pas signalés.
+        "REDOS", ("python", "javascript", "typescript", "php", "java", "csharp", "go"),
+        _r(r"^(?=.*(RegExp\(|\bre\.(compile|match|search|fullmatch|sub|split|findall|finditer)\(|Pattern\."
+           r"(compile|matches)\(|\.matches\(|\bpreg_\w+\(|regexp\.(MustCompile|Compile|MatchString)\(|new\s+Regex\("
+           r"|Regex\.(IsMatch|Match|Replace)\(|[=(,:]\s*/[^/*\s]))"
+           r".*\((?:\?:)?(?:\[(?:[^\]\\]|\\.)*\]|\\[dDwWsS]|\.)[+*]"
+           r"(?:(?:\[(?:[^\]\\]|\\.)*\]|\\.|[^()\\|])[?*])*\)(?:[+*]|\{\d+,\})"),
+        "Expression régulière vulnérable au déni de service (ReDoS)", "CWE-1333", M,
+        "Une répétition imbriquée dans une autre fait exploser le temps d'évaluation sur certaines chaînes "
+        "(retour arrière exponentiel) : une seule requête peut bloquer le serveur.",
+        "Supprimer la répétition imbriquée (« ([0-9]+)+ » devient « [0-9]+ »), borner la longueur de "
+        "l'entrée, ou utiliser un moteur sans retour arrière (RE2).",
+    ),
 ]

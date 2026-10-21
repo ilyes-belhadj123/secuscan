@@ -14,6 +14,7 @@ import tree_sitter_java
 import tree_sitter_javascript
 import tree_sitter_php
 import tree_sitter_typescript
+import yaml
 from tree_sitter import Language, Parser
 
 _GRAMMARS = {
@@ -26,6 +27,19 @@ _GRAMMARS = {
     "csharp": tree_sitter_c_sharp.language,
     "go": tree_sitter_go.language,
 }
+
+
+YAML_LANGUAGES = {"kubernetes", "compose"}
+
+
+def _yaml_error(code: str) -> str | None:
+    try:
+        list(yaml.safe_load_all(code))  # chargeur sûr : aucune balise Python n'est interprétée
+    except yaml.YAMLError as exc:
+        mark = getattr(exc, "problem_mark", None)
+        problem = getattr(exc, "problem", None) or "syntaxe YAML invalide"
+        return f"ligne {mark.line + 1} : {problem}" if mark else problem
+    return None
 
 
 @lru_cache
@@ -49,6 +63,8 @@ def count_errors(language: str, code: str, filename: str = "") -> int | None:
             return 0
         except SyntaxError:
             return 1
+    if language in YAML_LANGUAGES:
+        return 0 if _yaml_error(code) is None else 1
     grammar = _grammar_for(language, code, filename)
     if grammar is None:
         return None
@@ -75,6 +91,8 @@ def first_error(language: str, code: str, filename: str = "") -> str | None:
         except SyntaxError as exc:
             return f"ligne {exc.lineno} : {exc.msg}"
         return None
+    if language in YAML_LANGUAGES:
+        return _yaml_error(code)
     grammar = _grammar_for(language, code, filename)
     if grammar is None:
         return None

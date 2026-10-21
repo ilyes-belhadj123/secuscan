@@ -31,6 +31,7 @@ log = logging.getLogger(__name__)
 
 
 # Points d'entrée (routes HTTP, lecture des entrées) : les fichiers qui en ont sont relus en priorité
+LOGIC_OVERLAP = 30  # lignes communes à deux tranches d'un grand fichier
 _ENTRY_POINT = re.compile(
     r"@app\.route|@\w+\.(get|post|put|delete|route)\(|\bapp\.(get|post|put|delete|use)\(|router\.\w+\(|"
     r"request\.(args|form|json|get_data)|req\.(query|params|body)|\$_(GET|POST|REQUEST|COOKIE)|"
@@ -217,23 +218,44 @@ class ScanService:
                 f.dismiss_reason, f.dismiss_justification = "accepted_risk", justification
         return findings
 
-    def _logic(self, scan: Scan, findings: list[Finding], redacted: dict, enricher: Enricher) -> list[Finding]:
-        """Revue IA de chaque fichier de code pour les failles logiques non couvertes par les règles."""
-        candidates = [
-            src for path, src in redacted.items()
-            if not manifest_kind(path.split("/")[-1]) and src.language in CODE_LANGUAGES
-            and src.content.count("\n") < self.settings.secuscan_logic_max_lines
-        ]
-        # Budget : au plus une part des appels, en commençant par les fichiers exposés (routes, entrées)
-        limit = min(
-            self.settings.secuscan_logic_max_files,
-            int(enricher.budget.max_calls * self.settings.secuscan_logic_budget_share),
+    def _logic_units(self, redacted: dict) -> list[tuple[SourceFile, int, int]]:
+        """Tous les fichiers de code, découpés en tranches (avec chevauchement) au-delà de la taille relue
+        d'un coup ; les plus exposés (routes, entrées utilisateur) d'abord."""
+        size = max(50, self.settings.secuscan_logic_max_lines)
+        overlap = min(LOGIC_OVERLAP, size // 4)
+        files = sorted(
+            (src for path, src in redacted.items()
+             if not manifest_kind(path.split("/")[-1]) and src.language in CODE_LANGUAGES),
+            key=lambda s: (-len(_ENTRY_POINT.findall(s.content)), s.path),
         )
-        candidates.sort(key=lambda s: (-len(_ENTRY_POINT.findall(s.content)), s.path))
-        sources = candidates[:limit]
-        if (skipped := len(candidates) - len(sources)) and self.settings.ai_enabled:
+        if self.settings.secuscan_logic_max_files > 0:
+            files = files[: self.settings.secuscan_logic_max_files]
+        units = []
+        for src in files:
+            total = src.content.count("\n") + 1
+            first = 1
+            while True:
+                last = min(total, first + size - 1)
+                units.append((src, first, last))
+                if last >= total:
+                    break
+                first = last - overlap + 1
+        return units
+
+    def _logic(self, scan: Scan, findings: list[Finding], redacted: dict, enricher: Enricher) -> list[Finding]:
+        """Revue IA de tous les fichiers de code pour les failles logiques non couvertes par les règles."""
+        units = self._logic_units(redacted)
+        # Budget de l'offre : on garde de quoi relire les alertes ensuite (par lots), le reste va à la revue
+        open_code = sum(1 for f in findings if f.kind != "dependency" and f.status == "open")
+        deps = sum(1 for f in findings if f.kind == "dependency")
+        reserved = -(-open_code // BATCH_SIZE) + min(deps, self.settings.secuscan_ai_max_dependency_reviews)
+        limit = max(0, enricher.budget.remaining_calls - reserved)
+        sources = units[:limit]
+        if len(sources) < len(units) and self.settings.ai_enabled:
+            unread = len({u[0].path for u in units} - {u[0].path for u in sources})
             scan.summary.warnings.append(
-                f"Revue logique IA limitée aux {len(sources)} fichiers les plus exposés ({skipped} non relus)."
+                f"Budget IA de l'offre atteint : revue logique de {len(sources)} parties de fichiers sur "
+                f"{len(units)} ({unread} fichier(s) non relus). Une offre supérieure relit tout le code."
             )
         if not sources:
             return []
@@ -244,7 +266,9 @@ class ScanService:
         self._progress(scan, f"Revue logique par l'IA (0/{len(sources)})", 0.4)
         results: list[Finding] = []
         with ThreadPoolExecutor(max_workers=max(1, self.settings.secuscan_ai_concurrency)) as pool:
-            futures = {pool.submit(enricher.discover_logic_flaws, src, flagged.get(src.path, [])): src for src in sources}
+            futures = {pool.submit(enricher.discover_logic_flaws, src, flagged.get(src.path, []), first, last): src
+                       for src, first, last in sources}
+            seen: set[tuple[str, int, str | None]] = set()
             for done, future in enumerate(as_completed(futures), start=1):
                 src = futures[future]
                 try:
@@ -256,9 +280,13 @@ class ScanService:
                     flaws = []
                 lines = src.content.split("\n")
                 for flaw in flaws:
-                    # Une faille déjà couverte par une règle sur les mêmes lignes n'est pas dupliquée
+                    # Une faille déjà couverte par une règle sur les mêmes lignes n'est pas dupliquée,
+                    # ni celle vue deux fois dans la zone commune de deux tranches
                     if any(flaw.start_line <= line <= flaw.end_line for line in flagged.get(src.path, [])):
                         continue
+                    if (key := (src.path, flaw.start_line, flaw.cwe)) in seen:
+                        continue
+                    seen.add(key)
                     excerpt = enclosing_excerpt(lines, src.language, flaw.start_line, flaw.end_line)
                     results.append(
                         Finding(

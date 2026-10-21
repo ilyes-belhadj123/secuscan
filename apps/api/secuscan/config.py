@@ -46,8 +46,9 @@ class Settings(BaseSettings):
     # Dossier de règles Opengrep propres à l'éditeur (jamais les règles Semgrep : licence)
     secuscan_opengrep_rules: str = ""
 
-    # Revue logique IA : fichiers de code analysés en entier (coût maîtrisé)
-    secuscan_logic_max_files: int = 40
+    # Revue logique IA : tous les fichiers de code sont relus (0 = sans plafond de fichiers ; seul le
+    # budget IA de l'offre limite) ; au-delà de max_lines lignes, un fichier est relu par tranches
+    secuscan_logic_max_files: int = 0
     secuscan_logic_max_lines: int = 400
 
     # Comptes et sessions (SS-2)
@@ -72,8 +73,13 @@ class Settings(BaseSettings):
     # SS-1 : « thread » = analyses dans le processus de l'API ; « worker » = file durable en base,
     # exécutée par un ou plusieurs processus `python -m secuscan.worker`
     secuscan_queue: Literal["thread", "worker"] = "thread"
-    # SS-4 : isolation de l'analyse statique (voir sandbox.py) : inline | process | container
-    secuscan_sandbox: Literal["inline", "process", "container"] = "inline"
+    # SS-4 : isolation de l'analyse statique (voir sandbox.py) : inline | process | container | ephemeral
+    secuscan_sandbox: Literal["inline", "process", "container", "ephemeral"] = "inline"
+    # Mode « ephemeral » (un conteneur par analyse, sandbox_docker.py) : moteur Docker, image, et volume
+    # nommé qui contient le dossier des analyses (vide : le dossier est monté directement)
+    secuscan_docker_socket: str = "/var/run/docker.sock"
+    secuscan_sandbox_image: str = "secuscan:local"
+    secuscan_sandbox_volume: str = ""
 
     # Mise en ligne : l'API sert aussi l'interface compilée (un seul service à héberger)
     secuscan_web_dist: Path = REPO_ROOT / "apps" / "web" / "dist"
@@ -116,8 +122,6 @@ class Settings(BaseSettings):
     # Maîtrise des coûts IA (SS-12)
     # Offre par défaut des analyses sans organisation (outils internes : benchmark, préparation démo)
     secuscan_plan: str = "pro"
-    # Part maximale du budget d'appels consacrée à la revue logique des fichiers
-    secuscan_logic_budget_share: float = 0.25
     # Dépendances expliquées par l'IA (les plus graves) ; les autres : explication locale depuis OSV
     secuscan_ai_max_dependency_reviews: int = 10
     # Tarifs en $ par million de jetons (Claude Sonnet 5 : 2 $ en entrée, 10 $ en sortie)

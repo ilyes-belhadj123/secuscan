@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { Link } from "react-router-dom";
 import { api, type ExerciseSummary, type TeamTraining } from "../api";
 import { formatDate, LANGUAGE_LABEL } from "../labels";
@@ -39,9 +39,11 @@ export default function TrainingPage() {
   const { me } = useSession();
   const [data, setData] = useState<{ exercises: ExerciseSummary[]; passed: number; total: number } | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [language, setLanguage] = useState<string | null>(null);
   useEffect(() => {
     api.exercises().then(setData).catch((e) => setError((e as Error).message));
   }, []);
+  const languages = useMemo(() => [...new Set((data?.exercises ?? []).map((ex) => ex.language))], [data]);
 
   if (!data) return <main className="container">{error ? <div className="card error">{error}</div> : <span className="spinner" />}</main>;
   const ratio = data.total ? data.passed / data.total : 0;
@@ -67,8 +69,17 @@ export default function TrainingPage() {
         </div>
       </section>
 
+      <div className="filters">
+        <button className={`chip ${!language ? "active" : ""}`} onClick={() => setLanguage(null)}>Tous</button>
+        {languages.map((l) => (
+          <button key={l} className={`chip ${language === l ? "active" : ""}`} onClick={() => setLanguage(l)}>
+            {LANGUAGE_LABEL[l] ?? l}
+          </button>
+        ))}
+      </div>
+
       <section className="grid-3">
-        {data.exercises.map((ex) => (
+        {data.exercises.filter((ex) => !language || ex.language === language).map((ex) => (
           <Link key={ex.id} to={`/formation/${ex.id}`} className="card stack" style={{ gap: 8, color: "inherit", textDecoration: "none",
             borderColor: ex.passed ? "var(--good)" : undefined }}>
             <div className="row" style={{ justifyContent: "space-between" }}>

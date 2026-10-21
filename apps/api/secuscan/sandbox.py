@@ -9,7 +9,9 @@ interviennent après, hors de la frontière. Trois modes (SECUSCAN_SANDBOX) :
   lecture des fichiers .env, avec limites de mémoire et de temps (Linux) ;
 - `container` : conteneur dédié (docker-compose : service `sandbox`) sans réseau, système de
   fichiers en lecture seule, sans privilèges, qui ne voit que le dossier des analyses. Échange par
-  fichiers : `<id>.request.json` déposé par le worker, `<id>.result.json` rendu par le conteneur.
+  fichiers : `<id>.request.json` déposé par le worker, `<id>.result.json` rendu par le conteneur ;
+- `ephemeral` : un conteneur neuf par analyse, détruit ensuite, qui ne voit que le dossier de cette
+  analyse (voir sandbox_docker.py).
 
 Le code analysé n'est jamais exécuté, dans aucun mode.
 """
@@ -299,6 +301,9 @@ def static_analysis(root: Path, settings: Settings, scan_id: str, exclude: list[
         return run_in_process(root, settings, scan_id, exclude, history_file)
     if mode == "container":
         return run_in_container(root, settings, scan_id, exclude, history_file=history_file)
+    if mode == "ephemeral":
+        from .sandbox_docker import run_in_ephemeral_container  # import local : ce module dépend de celui-ci
+        return run_in_ephemeral_container(root, settings, scan_id, exclude, history_file)
     return analyze_static(root, settings, scan_id, exclude, progress, history_file)
 
 
@@ -339,13 +344,16 @@ def serve_once(box: Path, allowed_roots: list[Path]) -> int:
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(prog="secuscan.sandbox")
     sub = parser.add_subparsers(dest="command", required=True)
-    sub.add_parser("run", help="une analyse : demande JSON sur l'entrée standard, résultat sur la sortie")
+    run = sub.add_parser("run", help="une analyse : demande JSON sur l'entrée standard, résultat sur la sortie")
+    run.add_argument("--request", help="demande JSON en argument (conteneur jetable) plutôt que sur l'entrée")
+    run.add_argument("--allow", type=Path, action="append", default=[], help="dossier analysable (répétable)")
     serve = sub.add_parser("serve", help="conteneur isolé : traite les demandes déposées dans un dossier")
     serve.add_argument("box", type=Path)
     serve.add_argument("--allow", type=Path, action="append", default=[], help="dossier analysable (répétable)")
     args = parser.parse_args(argv)
     if args.command == "run":
-        sys.stdout.write(_handle(json.loads(sys.stdin.read()), []).to_json())
+        request = json.loads(args.request if args.request is not None else sys.stdin.read())
+        sys.stdout.write(_handle(request, args.allow).to_json())
         return 0
     args.box.mkdir(parents=True, exist_ok=True)
     log.info("Analyse isolée : en attente de demandes dans %s", args.box)

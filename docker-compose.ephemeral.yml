@@ -1,0 +1,28 @@
+# SS-4 — un conteneur jetable par analyse, à la place du conteneur « sandbox » partagé.
+# Lancement :
+#   DOCKER_GID=$(stat -c %g /var/run/docker.sock) SECUSCAN_DOMAIN=secuscan.example.com \
+#     docker compose -f docker-compose.yml -f docker-compose.ephemeral.yml up -d --build
+# Prérequis : Docker Engine 26 ou plus (montage d'un sous-dossier de volume). Voir docs/deploiement.md.
+
+services:
+  worker:
+    environment:
+      SECUSCAN_SANDBOX: ephemeral
+      SECUSCAN_SANDBOX_IMAGE: secuscan:${SECUSCAN_VERSION:-local}
+      # Chaque conteneur ne reçoit que le sous-dossier de son analyse dans ce volume
+      SECUSCAN_SANDBOX_VOLUME: secuscan-work
+    # Le worker demande au moteur Docker de créer les conteneurs d'analyse
+    volumes:
+      # secuscan: ignore[COMPOSE-DOCKER-SOCKET] contrepartie assumée de ce mode, voir docs/deploiement.md
+      - /var/run/docker.sock:/var/run/docker.sock
+    group_add:
+      - "${DOCKER_GID:?indiquer DOCKER_GID (groupe propriétaire de /var/run/docker.sock)}"
+
+  # Le conteneur partagé n'est plus utilisé
+  sandbox:
+    profiles: ["shared-sandbox"]
+
+volumes:
+  # Nom fixe : référencé par SECUSCAN_SANDBOX_VOLUME, quel que soit le nom du projet compose
+  secuscan-work:
+    name: secuscan-work

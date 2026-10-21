@@ -71,6 +71,8 @@ CWE_TO_OWASP = {
     "CWE-319": "A04",
     "CWE-494": "A08",
     "CWE-1104": "A03",
+    "CWE-1333": "A06",
+    "CWE-434": "A06",
 }
 
 CWE_NAMES = {

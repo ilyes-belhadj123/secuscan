@@ -286,6 +286,315 @@ public class UserRepository {
                   _c("Le login est lié comme paramètre", r"\.set(String|Object)\(\s*\d+\s*,\s*login\s*\)")),
         forbidden=(_c("Le login n'est plus concaténé à la requête", r"\+\s*login\b|login\s*\+"),),
     ),
+    Exercise(
+        id="py-ssrf", title="Aperçu d'un flux partenaire", language="python", filename="preview.py",
+        cwe="CWE-918", difficulty="moyenne",
+        brief="Le serveur télécharge n'importe quelle adresse fournie par le navigateur : un attaquant peut lui "
+              "faire lire des services internes (métadonnées du cloud, interfaces d'administration). Ne laissez "
+              "l'utilisateur choisir qu'un partenaire parmi une liste connue.",
+        code='''import requests
+from flask import Flask, request
+
+app = Flask(__name__)
+
+
+@app.get("/preview")
+def preview():
+    url = request.args.get("url", "")
+    response = requests.get(url, timeout=5)
+    return response.text[:500]
+''',
+        solution='''import requests
+from flask import Flask, request
+
+app = Flask(__name__)
+PARTNER_FEEDS = {
+    "meteo": "https://meteo.example.com/today.json",
+    "news": "https://news.example.com/feed.json",
+}
+
+
+@app.get("/preview")
+def preview():
+    source = request.args.get("source", "")
+    partner = source if source in PARTNER_FEEDS else "meteo"
+    response = requests.get(PARTNER_FEEDS[partner], timeout=5, allow_redirects=False)
+    return response.text[:500]
+''',
+        rules=("PY-SSRF",),
+        hints=("Plutôt que de filtrer une adresse libre (les contournements sont nombreux), faites choisir "
+               "une clé : le serveur connaît déjà les adresses autorisées.",
+               "Un dictionnaire « nom → adresse » et l'idiome « valeur if valeur in LISTE else défaut » suffisent.",
+               "Pensez aussi à refuser les redirections : allow_redirects=False."),
+        required=(_c("La route /preview existe toujours", r"def\s+preview\s*\("),
+                  _c("L'adresse appelée vient d'une liste fixée par le serveur",
+                     r"\bin\s+[A-Z_][A-Z0-9_]*\b")),
+        forbidden=(_c("L'adresse fournie par le navigateur n'est plus appelée telle quelle",
+                      r"requests\.\w+\(\s*url\b"),),
+    ),
+    Exercise(
+        id="js-path", title="Téléchargement d'une facture", language="javascript", filename="invoices.js",
+        cwe="CWE-22", difficulty="facile",
+        brief="Le nom de fichier demandé est ajouté au chemin du dossier des factures : « ../../.env » ferait "
+              "télécharger un fichier hors du dossier. Ne gardez que le nom du fichier.",
+        code='''const express = require("express");
+const path = require("path");
+
+const app = express();
+
+app.get("/invoices", (req, res) => {
+  const file = path.join(__dirname, "invoices", req.query.name);
+  res.sendFile(file);
+});
+''',
+        solution='''const express = require("express");
+const path = require("path");
+
+const app = express();
+
+app.get("/invoices", (req, res) => {
+  const name = path.basename(String(req.query.name || ""));
+  res.sendFile(path.join(__dirname, "invoices", name));
+});
+''',
+        rules=("JS-PATH", "JS-PATH-FLOW"),
+        hints=("Les séquences « ../ » permettent de remonter dans l'arborescence.",
+               "path.basename() ne garde que le dernier élément d'un chemin."),
+        required=(_c("Le nom est réduit au seul nom de fichier", r"path\.basename\("),),
+        forbidden=(_c("La saisie n'est plus ajoutée telle quelle au chemin",
+                      r"path\.(join|resolve)\([^)]*req\.query\.name"),),
+    ),
+    Exercise(
+        id="js-cmdi", title="Conversion d'une image", language="javascript", filename="thumbnails.js",
+        cwe="CWE-78", difficulty="moyenne",
+        brief="Le nom du fichier envoyé est inséré dans une commande passée au shell : « a.png; curl … » "
+              "lancerait une autre commande sur le serveur. Lancez le programme sans shell, avec ses "
+              "arguments séparés.",
+        code='''const { exec } = require("child_process");
+const express = require("express");
+
+const app = express();
+
+app.post("/thumbnail", (req, res) => {
+  exec("convert uploads/" + req.body.file + " -resize 200x200 thumbs/out.png", (err) => {
+    res.sendStatus(err ? 500 : 204);
+  });
+});
+''',
+        solution='''const { execFile } = require("child_process");
+const express = require("express");
+const path = require("path");
+
+const app = express();
+
+app.post("/thumbnail", (req, res) => {
+  const file = path.basename(String(req.body.file || ""));
+  execFile("convert", [path.join("uploads", file), "-resize", "200x200", "thumbs/out.png"], (err) => {
+    res.sendStatus(err ? 500 : 204);
+  });
+});
+''',
+        rules=("JS-CMDI", "JS-CMDI-FLOW"),
+        hints=("exec() passe toute la chaîne à /bin/sh, qui interprète « ; », « | », « $( ) ».",
+               "execFile() lance directement le programme : chaque argument est un élément d'un tableau.",
+               "Le nom de fichier lui-même ne doit pas sortir du dossier uploads : path.basename()."),
+        required=(_c("Le programme est lancé avec execFile (ou spawn) et des arguments séparés",
+                     r"\b(execFile|spawn)\(\s*\"convert\"\s*,\s*\["),),
+        forbidden=(_c("Plus aucune commande passée au shell", r"\bexec\(|shell\s*:\s*true"),),
+    ),
+    Exercise(
+        id="cs-sqli", title="Recherche de produits (ADO.NET)", language="csharp", filename="ProductRepository.cs",
+        cwe="CWE-89", difficulty="moyenne",
+        brief="Le nom recherché est concaténé à la requête SQL : « ' OR 1=1 -- » renverrait tout le "
+              "catalogue, et pire. Passez la valeur comme paramètre de la commande.",
+        code='''using Microsoft.Data.SqlClient;
+
+public class ProductRepository
+{
+    public SqlDataReader FindByName(SqlConnection conn, string name)
+    {
+        var cmd = new SqlCommand("SELECT Id, Name FROM Products WHERE Name = '" + name + "'", conn);
+        return cmd.ExecuteReader();
+    }
+}
+''',
+        solution='''using Microsoft.Data.SqlClient;
+
+public class ProductRepository
+{
+    public SqlDataReader FindByName(SqlConnection conn, string name)
+    {
+        var cmd = new SqlCommand("SELECT Id, Name FROM Products WHERE Name = @name", conn);
+        cmd.Parameters.AddWithValue("@name", name);
+        return cmd.ExecuteReader();
+    }
+}
+''',
+        rules=("CS-SQLI", "CS-SQLI-FLOW"),
+        hints=("SqlCommand accepte des paramètres nommés, par exemple « @name » dans la requête.",
+               "Ajoutez la valeur avec cmd.Parameters.AddWithValue (ou Add avec un SqlDbType)."),
+        required=(_c("La méthode FindByName existe toujours", r"FindByName\s*\("),
+                  _c("La requête contient un paramètre nommé", r"SqlCommand\(\s*\"[^\"]*@\w+"),
+                  _c("La valeur est liée au paramètre", r"Parameters\.(AddWithValue|Add)\(\s*\"@\w+\"")),
+        forbidden=(_c("Le nom n'est plus concaténé à la requête", r"\+\s*name\b|\bname\s*\+|\$\""),),
+    ),
+    Exercise(
+        id="go-sqli", title="Détail d'une commande (database/sql)", language="go", filename="orders.go",
+        cwe="CWE-89", difficulty="facile",
+        brief="L'identifiant est concaténé à la requête : il suffit d'y glisser une apostrophe pour réécrire "
+              "la requête. Utilisez un paramètre positionnel.",
+        code='''package store
+
+import "database/sql"
+
+func FindOrder(db *sql.DB, id string) (*sql.Rows, error) {
+	return db.Query("SELECT id, total FROM orders WHERE id = '" + id + "'")
+}
+''',
+        solution='''package store
+
+import "database/sql"
+
+func FindOrder(db *sql.DB, id string) (*sql.Rows, error) {
+	return db.Query("SELECT id, total FROM orders WHERE id = $1", id)
+}
+''',
+        rules=("GO-SQLI", "GO-SQLI-FLOW"),
+        hints=("db.Query accepte la requête puis les valeurs, séparément.",
+               "Le marqueur dépend du pilote : « $1 » (PostgreSQL) ou « ? » (MySQL, SQLite)."),
+        required=(_c("La fonction FindOrder existe toujours", r"func\s+FindOrder\s*\("),
+                  _c("La valeur est passée en paramètre de Query",
+                     r"\.Query(Row)?(Context)?\([^\n]*(\$1|\?)\"\s*,\s*id\s*\)")),
+        forbidden=(_c("L'identifiant n'est plus concaténé ni formaté", r"\+\s*id\b|\bid\s*\+|Sprintf"),),
+    ),
+    Exercise(
+        id="go-cmdi", title="Diagnostic réseau (os/exec)", language="go", filename="diagnostics.go",
+        cwe="CWE-78", difficulty="moyenne",
+        brief="La commande passe par « sh -c » avec le nom d'hôte collé à la chaîne : « example.com && … » "
+              "exécuterait une seconde commande. Lancez ping directement, l'hôte étant un argument séparé.",
+        code='''package tools
+
+import "os/exec"
+
+func Ping(host string) ([]byte, error) {
+	return exec.Command("sh", "-c", "ping -c 1 "+host).Output()
+}
+''',
+        solution='''package tools
+
+import "os/exec"
+
+func Ping(host string) ([]byte, error) {
+	return exec.Command("ping", "-c", "1", "--", host).Output()
+}
+''',
+        rules=("GO-CMDI", "GO-CMDI-FLOW"),
+        hints=("exec.Command lance un programme sans shell si on ne lui donne pas « sh -c ».",
+               "« -- » empêche qu'un hôte commençant par « - » soit lu comme une option."),
+        required=(_c("ping est lancé directement, l'hôte en argument séparé",
+                     r"exec\.Command(Context)?\([^\n]*\"ping\"[^\n]*,\s*host\s*\)"),),
+        forbidden=(_c("Plus de shell (« sh -c », « bash -c »)", r"\"(ba)?sh\"\s*,\s*\"-c\""),
+                   _c("L'hôte n'est plus concaténé à la commande", r"\+\s*host\b")),
+    ),
+    Exercise(
+        id="docker-root", title="Image Docker d'une API", language="dockerfile", filename="Dockerfile",
+        cwe="CWE-250", difficulty="facile",
+        brief="L'image part d'une version « latest » (contenu imprévisible d'une construction à l'autre) et "
+              "l'application tourne en root : une faille dans l'API donnerait tous les droits dans le "
+              "conteneur. Figez la version et lancez l'application avec un utilisateur dédié.",
+        code='''FROM python:latest
+WORKDIR /app
+COPY requirements.txt .
+RUN pip install --no-cache-dir -r requirements.txt
+COPY . .
+CMD ["python", "app.py"]
+''',
+        solution='''FROM python:3.12-slim
+WORKDIR /app
+COPY requirements.txt .
+RUN pip install --no-cache-dir -r requirements.txt
+COPY . .
+RUN useradd --create-home --uid 10001 app
+USER app
+CMD ["python", "app.py"]
+''',
+        rules=("DOCKER-LATEST", "DOCKER-ROOT"),
+        hints=("Une image comme python:3.12-slim fixe la version (et réduit la surface d'attaque).",
+               "Créez un utilisateur (useradd) puis basculez dessus avec l'instruction USER, avant CMD."),
+        required=(_c("Instruction USER avec un utilisateur non root", r"^USER\s+(?!root\b|0\b)\S+"),),
+        forbidden=(_c("Plus d'image « latest » ni sans version", r"^FROM\s+[^\s:@]+(:latest)?\s*$"),),
+    ),
+    Exercise(
+        id="k8s-hardening", title="Déploiement Kubernetes d'un service", language="kubernetes",
+        filename="deployment.yaml", cwe="CWE-250", difficulty="difficile",
+        brief="Le conteneur peut tourner en root, élever ses privilèges, et n'a aucune limite de ressources "
+              "(un seul pod peut saturer le nœud). Durcissez le déploiement sans changer l'image.",
+        code='''apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: orders-api
+spec:
+  replicas: 2
+  selector:
+    matchLabels:
+      app: orders-api
+  template:
+    metadata:
+      labels:
+        app: orders-api
+    spec:
+      containers:
+        - name: api
+          image: registry.example.com/orders-api:1.4.2
+          ports:
+            - containerPort: 8080
+          securityContext:
+            allowPrivilegeEscalation: true
+''',
+        solution='''apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: orders-api
+spec:
+  replicas: 2
+  selector:
+    matchLabels:
+      app: orders-api
+  template:
+    metadata:
+      labels:
+        app: orders-api
+    spec:
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 10001
+      containers:
+        - name: api
+          image: registry.example.com/orders-api:1.4.2
+          ports:
+            - containerPort: 8080
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop: ["ALL"]
+          resources:
+            requests:
+              cpu: 100m
+              memory: 128Mi
+            limits:
+              cpu: 500m
+              memory: 256Mi
+''',
+        rules=("K8S-PRIV-ESCALATION", "K8S-NO-NONROOT", "K8S-NO-LIMITS", "K8S-RUN-AS-ROOT"),
+        hints=("securityContext.runAsNonRoot: true refuse de démarrer un conteneur qui tournerait en root.",
+               "allowPrivilegeEscalation: false et capabilities.drop: [\"ALL\"] retirent les droits inutiles.",
+               "resources.limits (cpu, memory) borne ce qu'un pod peut consommer."),
+        required=(_c("runAsNonRoot: true", r"runAsNonRoot:\s*true"),
+                  _c("Élévation de privilèges interdite", r"allowPrivilegeEscalation:\s*false"),
+                  _c("Limites de ressources", r"limits:\s*\n\s+(cpu|memory):")),
+        forbidden=(_c("L'élévation de privilèges n'est plus autorisée", r"allowPrivilegeEscalation:\s*true"),),
+    ),
 )
 
 EXERCISES_BY_ID = {e.id: e for e in EXERCISES}

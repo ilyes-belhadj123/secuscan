@@ -21,6 +21,8 @@ class Rule:
     context_requires: re.Pattern | None = None
     # Motif qui, s'il est présent dans le fichier, désactive la règle (mitigation déjà en place)
     file_excludes: re.Pattern | None = None
+    # Motif qui doit être présent quelque part dans le fichier pour que la règle s'applique
+    file_requires: re.Pattern | None = None
     # Motif qui, s'il est présent sur la ligne, désactive la règle (ex. valeur échappée)
     line_excludes: re.Pattern | None = None
     tags: tuple[str, ...] = field(default_factory=tuple)
