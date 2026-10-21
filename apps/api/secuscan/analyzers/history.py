@@ -22,10 +22,19 @@ HISTORY_FILE = ".secuscan-history.txt"  # à côté du dossier analysé, jamais 
 MAX_HISTORY_BYTES = 20 * 1024 * 1024
 HISTORY_TIMEOUT_SECONDS = 120
 _COMMIT = "@@SECUSCAN-COMMIT "
+
+def _diff_path(header: str) -> str:
+    """Chemin d'un en-tête « +++ b/… » ; entre guillemets (caractères spéciaux), séquences octales décodées."""
+    if header.startswith('"') and header.endswith('"'):
+        header = header[1:-1].encode("latin-1", "backslashreplace").decode("unicode_escape")
+        header = header.encode("latin-1").decode("utf-8", "replace")
+    return header[2:] if header.startswith("b/") else header
+
 _HUNK = re.compile(r"^@@ -\d+(?:,\d+)? \+(\d+)(?:,\d+)? @@")
 # Options qui empêchent git d'exécuter un programme pendant l'export (pilotes de diff, pager…)
+# core.quotePath=false : chemins accentués écrits tels quels (sinon « "b/caf\303\251.py" »)
 _SAFE_GIT = ["git", "-c", "core.hooksPath=/dev/null", "-c", "core.pager=cat", "-c", "core.fsmonitor=false",
-             "-c", "diff.external=", "--no-pager"]
+             "-c", "diff.external=", "-c", "core.quotePath=false", "--no-pager"]
 
 
 @dataclass
@@ -93,9 +102,9 @@ def find_history_secrets(text: str, current: set[str]) -> list[HistorySecret]:
             flush()
             commit, _, date = raw[len(_COMMIT):].partition(" ")
             path, lines = "", []
-        elif raw.startswith(("+++ b/", "+++ /dev/null")):
+        elif raw.startswith(("+++ b/", '+++ "b/', "+++ /dev/null")):
             flush()
-            path = raw[6:].strip() if raw.startswith("+++ b/") else ""
+            path = _diff_path(raw[4:].strip()) if not raw.startswith("+++ /dev/null") else ""
             lines = []
         elif m := _HUNK.match(raw):
             next_line = int(m.group(1))

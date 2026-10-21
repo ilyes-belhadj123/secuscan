@@ -36,6 +36,7 @@ export const LANGUAGE_LABEL: Record<string, string> = {
   kubernetes: "Kubernetes",
   compose: "Docker Compose",
   terraform: "Terraform",
+  config: "Configuration",
 };
 
 export const VERDICT_LABEL = {

@@ -21,7 +21,8 @@ def _r(pattern: str, flags: int = 0) -> re.Pattern:
     return re.compile(pattern, flags)
 
 
-_IMAGE_LATEST = _r(r"^\s*(-\s*)?image:\s*[\"']?[^\s\"':@]+(:latest)?[\"']?\s*$")
+# (une variable « ${IMAGE} » est choisie au déploiement : pas signalée)
+_IMAGE_LATEST = _r(r"^\s*(-\s*)?image:\s*[\"']?[^\s\"':@$]+(:latest)?[\"']?\s*$")
 _PRIVILEGED = _r(r"^\s*privileged:\s*true\b")
 _DANGEROUS_CAPS = _r(r"^\s*-\s*[\"']?(CAP_)?(SYS_ADMIN|NET_ADMIN|SYS_PTRACE|SYS_MODULE|DAC_READ_SEARCH|ALL)[\"']?\s*$")
 
@@ -202,27 +203,38 @@ _WORKLOAD = re.compile(r"^\s*kind:\s*(Deployment|StatefulSet|DaemonSet|Pod|Job|C
 
 
 def _kubernetes(content: str, lines: list[str]) -> list[tuple[str, int]]:
-    if not _WORKLOAD.search(content):
-        return []
-    anchor = _find(lines, re.compile(r"^\s*containers:"))
+    """Par document YAML (séparés par « --- ») : le durcissement d'un déploiement ne vaut pas pour un
+    autre, et les « limits » d'une LimitRange ne sont pas celles d'un conteneur."""
     out = []
-    if not re.search(r"runAsNonRoot:\s*true", content):
-        out.append(("K8S-NO-NONROOT", anchor))
-    if not re.search(r"^\s*limits:", content, re.M):
-        out.append(("K8S-NO-LIMITS", anchor))
+    start = 0
+    for end in [i for i, line in enumerate(lines) if line.startswith("---")] + [len(lines)]:
+        doc_lines = lines[start:end]
+        doc = "\n".join(doc_lines)
+        if _WORKLOAD.search(doc):
+            anchor = start + _find(doc_lines, re.compile(r"^\s*containers:"))
+            if not re.search(r"runAsNonRoot:\s*true", doc):
+                out.append(("K8S-NO-NONROOT", anchor))
+            if not re.search(r"^\s*limits:", doc, re.M):
+                out.append(("K8S-NO-LIMITS", anchor))
+        start = end + 1
     return out
 
 
 def _terraform(lines: list[str]) -> list[tuple[str, int]]:
     """Règle d'entrée ouverte à tout Internet (bloc ingress, ou ressource de règle de type ingress)."""
     out = []
-    depth, ingress_depth = 0, None
+    depth, ingress_depth, cidr_list = 0, None, False
     for i, line in enumerate(lines, start=1):
         if ingress_depth is None and (re.match(r"^\s*ingress\s*\{", line)
                                       or re.search(r"resource\s+\"aws_(vpc_security_group_ingress_rule|"
                                                    r"security_group_rule)\"", line)):
             ingress_depth = depth
-        open_to_all = re.search(r"cidr", line) and re.search(r"\"0\.0\.0\.0/0\"|\"::/0\"", line)
+        # « cidr_blocks = [ (retour à la ligne) "0.0.0.0/0" ] » : la liste peut s'étendre sur plusieurs lignes
+        if re.search(r"cidr\w*\s*=\s*\[", line) and "]" not in line.split("[", 1)[1]:
+            cidr_list = True
+        open_to_all = (re.search(r"cidr", line) or cidr_list) and re.search(r"\"0\.0\.0\.0/0\"|\"::/0\"", line)
+        if cidr_list and "]" in line and not re.search(r"cidr\w*\s*=\s*\[", line):
+            cidr_list = False
         if ingress_depth is not None and open_to_all:
             around = "\n".join(lines[max(0, i - 8):i + 8])
             if not re.search(r"type\s*=\s*\"egress\"", around):  # aws_security_group_rule de sortie

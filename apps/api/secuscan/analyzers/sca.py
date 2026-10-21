@@ -184,6 +184,58 @@ def parse_go_mod(m: ManifestFile) -> list[Dependency]:
     return deps
 
 
+def parse_yarn_lock(m: ManifestFile) -> list[Dependency]:
+    """yarn.lock v1 (« version "1.2.3" ») et v2+ (« version: 1.2.3 »)."""
+    deps, names, header_line = [], [], 0
+    for i, line in enumerate(m.content.split("\n"), start=1):
+        if line and not line[0].isspace() and line.rstrip().endswith(":") and not line.startswith("#"):
+            specs = [s.strip().strip('"') for s in line.rstrip()[:-1].split(",")]
+            names = sorted({s.rsplit("@", 1)[0] for s in specs if "@" in s[1:]})
+            header_line = i
+        elif names and (match := re.match(r"^\s+version:?\s+\"?([\w.\-+]+)\"?\s*$", line)):
+            if version := _clean_version(match.group(1)):
+                deps += [Dependency("npm", name, version, m.path, header_line) for name in names]
+            names = []
+    return deps
+
+
+def parse_pnpm_lock(m: ManifestFile) -> list[Dependency]:
+    """pnpm-lock.yaml : clés « /nom@1.2.3 » (v6) ou « nom@1.2.3 » (v9) de la section packages."""
+    deps = []
+    in_packages = False
+    for i, line in enumerate(m.content.split("\n"), start=1):
+        if line.strip() and not line.startswith(" "):
+            in_packages = line.startswith("packages:")
+            continue
+        match = re.match(r"^  ['\"]?/?((?:@[^/@\s]+/)?[^@\s/'\"]+)@(\d[^:('\"\s]*)", line) if in_packages else None
+        if match and (version := _clean_version(match.group(2))):
+            deps.append(Dependency("npm", match.group(1), version, m.path, i))
+    return deps
+
+
+def parse_toml_lock(m: ManifestFile) -> list[Dependency]:
+    """poetry.lock et uv.lock : blocs [[package]] avec name et version."""
+    deps = []
+    for match in re.finditer(r'\[\[package\]\]\s*\nname\s*=\s*"([^"]+)"\s*\nversion\s*=\s*"([^"]+)"', m.content):
+        if version := _clean_version(match.group(2)):
+            deps.append(Dependency("PyPI", match.group(1), version, m.path,
+                                   m.content.count("\n", 0, match.start()) + 2))
+    return deps
+
+
+def parse_pipfile_lock(m: ManifestFile) -> list[Dependency]:
+    try:
+        data = json.loads(m.content)
+    except json.JSONDecodeError:
+        return []
+    deps = []
+    for section in ("default", "develop"):
+        for name, info in (data.get(section) or {}).items():
+            if isinstance(info, dict) and (version := _clean_version(str(info.get("version", "")))):
+                deps.append(Dependency("PyPI", name, version, m.path, _line_of(m.content, f'"{name}"')))
+    return deps
+
+
 PARSERS = {
     "requirements.txt": parse_requirements,
     "pyproject.toml": parse_pyproject,
@@ -194,11 +246,20 @@ PARSERS = {
     "pom.xml": parse_pom,
     "*.csproj": parse_csproj,
     "go.mod": parse_go_mod,
+    "yarn.lock": parse_yarn_lock,
+    "pnpm-lock.yaml": parse_pnpm_lock,
+    "poetry.lock": parse_toml_lock,
+    "uv.lock": parse_toml_lock,
+    "Pipfile.lock": parse_pipfile_lock,
 }
 
 
 # Manifeste à plages de versions → lockfile qui donne les versions réellement installées
-_LOCKFILE_FOR = {"package.json": "package-lock.json", "composer.json": "composer.lock"}
+_LOCKFILE_FOR = {
+    "package.json": ("package-lock.json", "yarn.lock", "pnpm-lock.yaml"),
+    "composer.json": ("composer.lock",),
+    "pyproject.toml": ("poetry.lock", "uv.lock"),
+}
 
 
 def parse_manifests(manifests: list[ManifestFile]) -> list[Dependency]:
@@ -209,8 +270,8 @@ def parse_manifests(manifests: list[ManifestFile]) -> list[Dependency]:
     def superseded(m: ManifestFile) -> bool:
         # Avec un lockfile dans le même dossier, les plages (« ^6.0.0 ») du manifeste ne disent pas
         # quelle version est installée : seul le lockfile fait foi (sinon faux positifs)
-        lock = _LOCKFILE_FOR.get(m.name)
-        return bool(lock) and (m.path[: -len(m.name)] + lock) in paths
+        folder = m.path[: -len(m.path.split("/")[-1])]
+        return any(folder + lock in paths for lock in _LOCKFILE_FOR.get(m.name, ()))
 
     # Les lockfiles sont plus précis : on les traite en premier
     for m in sorted((m for m in manifests if not superseded(m)),

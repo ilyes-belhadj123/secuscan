@@ -36,7 +36,15 @@ MANIFEST_FILES = {
     "pom.xml": "java",
     "*.csproj": "csharp",  # le nom du fichier est celui du projet : MonApi.csproj
     "go.mod": "go",
+    # Fichiers de verrouillage : versions réellement installées
+    "yarn.lock": "javascript",
+    "pnpm-lock.yaml": "javascript",
+    "poetry.lock": "python",
+    "uv.lock": "python",
+    "Pipfile.lock": "python",
 }
+# Variantes de requirements.txt (requirements-dev.txt, requirements.prod.txt)
+_REQUIREMENTS_VARIANT = re.compile(r"^requirements[\w.-]*\.txt$", re.I)
 
 
 # Langages de code applicatif (revue logique IA, suivi des données) ; le reste est de l'infrastructure
@@ -68,6 +76,8 @@ def manifest_kind(filename: str) -> str | None:
         return filename
     if filename.lower().endswith(".csproj"):
         return "*.csproj"
+    if _REQUIREMENTS_VARIANT.match(filename):
+        return "requirements.txt"
     return None
 
 IGNORED_DIRS = {
@@ -95,11 +105,25 @@ class ManifestFile:
     content: str
 
 
+# Fichiers de configuration : lus seulement pour y chercher des secrets (mot de passe de la base dans
+# application.properties, jeton dans .npmrc…), sans règles de code ni revue IA
+CONFIG_LANGUAGE = "config"
+CONFIG_EXTENSIONS = {".properties", ".json", ".yml", ".yaml", ".ini", ".cfg", ".conf", ".toml", ".xml", ".config",
+                     ".env", ".tfvars"}
+CONFIG_NAMES = {".npmrc", ".pypirc", ".netrc", ".dockercfg", ".git-credentials", "credentials"}
+
+
+def is_config_file(name: str) -> bool:
+    lower = name.lower()
+    return (lower in CONFIG_NAMES or lower.startswith(".env") or Path(lower).suffix in CONFIG_EXTENSIONS)
+
+
 @dataclass
 class CodeBase:
     files: list[SourceFile]
     manifests: list[ManifestFile]
     vendored: list[str] = field(default_factory=list)  # bibliothèques tierces ignorées
+    configs: list[SourceFile] = field(default_factory=list)  # pour la recherche de secrets uniquement
 
     @property
     def languages(self) -> dict[str, int]:
@@ -198,7 +222,7 @@ def is_vendored(rel_path: str, content: str) -> bool:
 def is_excluded(rel_path: str, patterns: list[str]) -> bool:
     """Motifs de type glob sur le chemin relatif (« tests/* », « *.min.js », « docs/ »)."""
     for pattern in patterns:
-        pattern = pattern.strip().lstrip("./")
+        pattern = pattern.strip().removeprefix("./").lstrip("/")  # « .github/ » garde son point
         if not pattern:
             continue
         if pattern.endswith("/") and (rel_path + "/").startswith(pattern):
@@ -212,6 +236,7 @@ def collect_codebase(root: Path, settings: Settings, exclude: list[str] | None =
     files: list[SourceFile] = []
     manifests: list[ManifestFile] = []
     vendored: list[str] = []
+    configs: list[SourceFile] = []
     root = root.resolve()
     for path in sorted(root.rglob("*")):
         rel_parts = path.relative_to(root).parts
@@ -232,13 +257,19 @@ def collect_codebase(root: Path, settings: Settings, exclude: list[str] | None =
         if not language and path.suffix.lower() in (".yaml", ".yml"):
             if (content := _read_text(path)) is not None and (language := yaml_kind(content)):
                 files.append(SourceFile(path=rel, language=language, content=content))
+            elif content is not None:
+                configs.append(SourceFile(path=rel, language=CONFIG_LANGUAGE, content=content))
+            continue
+        if not language and is_config_file(path.name):
+            if (content := _read_text(path)) is not None and not is_vendored(rel, content):
+                configs.append(SourceFile(path=rel, language=CONFIG_LANGUAGE, content=content))
             continue
         if language and (content := _read_text(path)) is not None:
             if is_vendored(rel, content):
                 vendored.append(rel)
                 continue
             files.append(SourceFile(path=rel, language=language, content=content))
-    return CodeBase(files=files, manifests=manifests, vendored=vendored)
+    return CodeBase(files=files, manifests=manifests, vendored=vendored, configs=configs)
 
 
 def language_for_filename(filename: str) -> str | None:

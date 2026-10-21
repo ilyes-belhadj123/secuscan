@@ -190,3 +190,249 @@ eval(req.body.y);
     keep = 'const glob = "src/*.js";\nconst re = /\/*$/;\neval(req.body.z);\n'
     assert mask_block_comments(keep, "javascript") == keep
     assert mask_block_comments("x = 1 /* jamais refermé\neval(a)\n", "javascript").endswith("eval(a)\n")
+
+
+def test_dot_directories_can_be_excluded():
+    from secuscan.ingest import is_excluded
+    assert is_excluded(".github/workflows/ci.yml", [".github/"])
+    assert is_excluded("src/app.py", ["./src/"])
+    assert not is_excluded("github/x.py", [".github/"])
+
+
+def test_identical_lines_get_distinct_fingerprints(settings, tmp_path):
+    from secuscan.sandbox import analyze_static
+    (tmp_path / "app.py").write_text("import os\n\ndef a(cmd):\n    os.system(cmd)\n\ndef b(cmd):\n    os.system(cmd)\n",
+                                     encoding="utf-8")
+    prints = [f.fingerprint for f in analyze_static(tmp_path, settings, "s").findings if f.rule_id == "PY-CMDI"]
+    assert len(prints) == 2 and len(set(prints)) == 2
+
+
+def test_a_sanitizer_only_protects_against_its_own_flaw():
+    # htmlspecialchars protège la page HTML, pas la requête SQL
+    php = "$id = htmlspecialchars($_GET['id']);\necho $id;\n$db->query(\"SELECT * FROM t WHERE id = $id\");\n"
+    assert flows(php, "php") == [(3, "PHP-SQLI-FLOW")]
+    # escapeshellarg protège la commande, pas la page
+    php = "$h = escapeshellarg($_GET['h']);\nexec('ping ' . $h);\necho $h;\n"
+    assert flows(php, "php") == [(3, "PHP-XSS-FLOW")]
+    # String() n'est pas un nettoyage
+    js = "app.get('/', async (req, res) => {\n  const u = String(req.query.u);\n  await fetch(u);\n});\n"
+    assert flows(js, "javascript") == [(3, "JS-SSRF")]
+    # Conversion en nombre : sûre partout
+    py = "n = int(request.args['n'])\ncursor.execute('SELECT * FROM t LIMIT ' + str(n))\n"
+    assert flows(py, "python") == []
+
+
+def test_url_encoded_component_and_server_side_reads_are_safe():
+    js = ("app.get('/', async (req, res) => {\n  const { id } = req.query;\n"
+          "  await axios.get(`https://cdn.example.com/a/${encodeURIComponent(id)}.png`);\n});\n")
+    assert flows(js, "javascript") == []
+    go = ("func Download(w http.ResponseWriter, r *http.Request) {\n\tfile := r.URL.Query().Get(\"file\")\n"
+          "\tdata, _ := os.ReadFile(filepath.Join(\"/srv\", filepath.Base(file)))\n\tw.Write(data)\n}\n")
+    assert flows(go, "go") == []  # le contenu du fichier vient du serveur, pas du client
+
+
+def test_prefix_check_protects_against_path_traversal():
+    js = """app.get('/download', (req, res) => {
+  const target = path.resolve(EXPORTS_DIR, String(req.query.name));
+  if (!target.startsWith(EXPORTS_DIR + path.sep)) return res.status(400).end();
+  res.sendFile(target);
+});
+"""
+    assert flows(js, "javascript") == []
+    unchecked = js.replace("  if (!target.startsWith(EXPORTS_DIR + path.sep)) return res.status(400).end();\n", "")
+    assert flows(unchecked, "javascript") == [(3, "JS-PATH-FLOW")]
+    py = ("target = os.path.realpath(os.path.join(BASE, request.args['f']))\n"
+          "if not target.startswith(BASE + os.sep):\n    abort(400)\nreturn send_file(target)\n")
+    assert flows(py, "python") == []
+    go = ("func D(w http.ResponseWriter, r *http.Request) {\n\tp := filepath.Join(base, r.URL.Query().Get(\"f\"))\n"
+          "\tif !strings.HasPrefix(p, base) {\n\t\treturn\n\t}\n\tos.ReadFile(p)\n}\n")
+    assert flows(go, "go") == []
+
+
+def test_statements_formatted_on_several_lines():
+    py = """from flask import request
+
+def search():
+    term = request.args.get("q")
+    cursor.execute(
+        "SELECT * FROM products WHERE name = '" + term + "'"
+    )
+"""
+    assert flows(py, "python") == [(5, "PY-SQLI-FLOW")]
+    js = """app.get("/", async (req, res) => {
+  const rows = await db.query(
+    `SELECT * FROM t WHERE id = ${req.query.id}`,
+  );
+  res.json(rows);
+});
+"""
+    assert flows(js, "javascript") == [(2, "JS-SQLI-FLOW")]
+    # Un callback n'est pas aspiré dans l'instruction : ses lignes restent analysées séparément
+    cb = """app.get("/", (req, res) => {
+  needle.get(req.query.url, (err, resp) => {
+    const name = req.query.name;
+    exec("ls " + name);
+  });
+});
+"""
+    assert flows(cb, "javascript") == [(2, "JS-SSRF"), (4, "JS-CMDI-FLOW")]
+
+
+def test_multi_line_signatures_are_followed_across_files():
+    from secuscan.analyzers.interproc import cross_file_flows
+    storage = "def load_file(\n    name,\n    mode=\"rb\",\n):\n    return open(\"/srv/\" + name, mode).read()\n"
+    routes = "from flask import request\n\ndef view():\n    return load_file(request.args[\"f\"])\n"
+    found = cross_file_flows([SourceFile("storage.py", "python", storage), SourceFile("routes.py", "python", routes)])
+    assert [(f.sink.file, f.sink.line) for f in found] == [("storage.py", 5)]
+
+
+def test_secrets_in_configuration_files_are_found(settings, tmp_path):
+    from secuscan.sandbox import analyze_static
+    (tmp_path / "src" / "main" / "resources").mkdir(parents=True)
+    (tmp_path / "src" / "main" / "resources" / "application.properties").write_text(
+        "spring.datasource.url=jdbc:postgresql://db/shop\nspring.datasource.password=Pl4ceholder-Db-Passw0rd\n",
+        encoding="utf-8")
+    (tmp_path / ".npmrc").write_text("//registry.example.com/:_authToken=npm_Pl4ceholderTokenValue000000000000000\n",
+                                     encoding="utf-8")
+    (tmp_path / "settings.yml").write_text("smtp:\n  password: \"Pl4ceholder-Smtp-Secret\"\n", encoding="utf-8")
+    result = analyze_static(tmp_path, settings, "s")
+    found = {f.file for f in result.findings if f.kind == "secret"}
+    assert found == {"src/main/resources/application.properties", ".npmrc", "settings.yml"}
+    # La valeur reste masquée dans ce qui sort de l'analyse (affichage, IA)
+    props = result.redacted["src/main/resources/application.properties"].content
+    assert "Pl4ceholder-Db-Passw0rd" not in props
+    # Aucune règle de code ne s'applique à ces fichiers
+    assert all(f.kind == "secret" for f in result.findings)
+
+
+def test_translated_labels_are_not_secrets(settings, tmp_path):
+    from secuscan.sandbox import analyze_static
+    (tmp_path / "i18n").mkdir()
+    (tmp_path / "i18n" / "messages_de.properties").write_text("password=Passwort\n", encoding="utf-8")
+    (tmp_path / "app.properties").write_text("ui.label.password=Contraseña\nfeature.token=enabled\n",
+                                             encoding="utf-8")
+    assert [f for f in analyze_static(tmp_path, settings, "s").findings if f.kind == "secret"] == []
+
+
+def test_interface_texts_are_not_sql():
+    def ids(code, language):
+        return [f.rule_id for f in sast.analyze_file(SourceFile("a", language, code))]
+    assert ids('msg = "Message from %s" % user\n', "python") == []
+    assert ids('if (confirm("Delete " + name + "?")) remove(name);\n', "javascript") == []
+    assert ids('label = "Select a file from the list: " + name\n', "python") == []
+    # Vraies requêtes, en majuscules ou en minuscules
+    assert ids('q = "SELECT * FROM users WHERE id = " + uid\n', "python") == ["PY-SQLI-BUILD"]
+    assert ids('const q = "select name from users where id = " + id;\n', "javascript") == ["JS-SQLI-BUILD"]
+    assert ids('q = ("SELECT id "\n     "FROM users WHERE name = \'%s\'" % name)\n', "python") == ["PY-SQLI-BUILD"]
+
+
+def test_sibling_callbacks_keep_the_route_variables():
+    js = """app.get("/", (req, res) => {
+  const id = req.query.id;
+  a.then(() => {
+    log("ok");
+  });
+  b.then(() => {
+    db.query("SELECT * FROM t WHERE id = " + id);
+  });
+});
+app.get("/other", (req, res) => {
+  db.query("SELECT * FROM t WHERE id = " + id);
+});
+"""
+    # La 2e route ne voit pas « id » de la première
+    assert flows(js, "javascript") == [(7, "JS-SQLI-FLOW")]
+
+
+def test_summarized_body_keeps_parameters_inside_callbacks():
+    from secuscan.analyzers.interproc import cross_file_flows
+    store = """function fetchProfile(profileName) {
+  return new Promise((resolve) => {
+    db.query("SELECT * FROM p WHERE name = '" + profileName + "'", resolve);
+  });
+}
+"""
+    route = 'app.get("/p", (req, res) => {\n  fetchProfile(req.query.name);\n});\n'
+    found = cross_file_flows([SourceFile("store.js", "javascript", store), SourceFile("route.js", "javascript", route)])
+    assert [(f.sink.file, f.sink.line) for f in found] == [("store.js", 3)]
+
+
+def test_bandit_runs_in_batches(tmp_path, monkeypatch):
+    from secuscan.analyzers import external
+    if not external.bandit_available():
+        return
+    monkeypatch.setattr(external, "BANDIT_BATCH", 1)
+    for i in range(3):
+        (tmp_path / f"m{i}.py").write_text("import subprocess\nsubprocess.call(cmd, shell=True)\n", encoding="utf-8")
+    found = external.run_bandit(tmp_path, [f"m{i}.py" for i in range(3)])
+    assert {f.file for f in found} == {"m0.py", "m1.py", "m2.py"}
+
+
+def test_sarif_with_absolute_paths_is_kept(tmp_path):
+    from secuscan.analyzers.external import parse_sarif
+    absolute = (tmp_path / "src" / "app.py").resolve().as_posix()
+    sarif = {"runs": [{"tool": {"driver": {"rules": [{"id": "r1"}]}}, "results": [
+        {"ruleId": "r1", "message": {"text": "m"}, "locations": [{"physicalLocation": {
+            "artifactLocation": {"uri": "file:///" + absolute.lstrip("/")}, "region": {"startLine": 3}}}]}]}]}
+    found = parse_sarif(sarif, {"src/app.py": "python"}, root=tmp_path)
+    assert [(f.file, f.start_line) for f in found] == [("src/app.py", 3)]
+
+
+def test_ternary_and_escaped_quotes():
+    from secuscan.analyzers.taint import split_arguments
+    js = "app.get('/', (req, res) => {\n  const u = req.query.u;\n  fetch(ok ? u : DEFAULT_URL);\n});\n"
+    assert flows(js, "javascript") == [(3, "JS-SSRF")]
+    # Clé d'objet : pas une utilisation de la variable
+    js_key = "app.get('/', (req, res) => {\n  const u = req.query.u;\n  fetch(API, { u: 1 });\n});\n"
+    assert flows(js_key, "javascript") == []
+    assert split_arguments('"a\\\\", b)') == ['"a\\\\"', " b"]
+    assert split_arguments('"x\\"y", z)') == ['"x\\"y"', " z"]
+
+
+def test_kubernetes_documents_are_checked_one_by_one():
+    hardened = """apiVersion: apps/v1
+kind: Deployment
+metadata: {name: api}
+spec:
+  template:
+    spec:
+      securityContext: {runAsNonRoot: true}
+      containers:
+        - name: api
+          image: registry.example.com/api:1.2.0
+          resources: {limits: {cpu: 500m}}
+"""
+    bare = hardened.replace("      securityContext: {runAsNonRoot: true}\n", "").replace("metadata: {name: api}",
+                                                                                         "metadata: {name: worker}")
+    found = sast.analyze_file(SourceFile("k8s.yaml", "kubernetes", hardened + "---\n" + bare))
+    assert [(f.rule_id, f.start_line) for f in found if f.rule_id == "K8S-NO-NONROOT"] == [("K8S-NO-NONROOT", 19)]
+    assert not [f for f in sast.analyze_file(SourceFile("c.yml", "compose", "services:\n  api:\n    image: ${API_IMAGE}\n"))
+                if f.rule_id == "IAC-IMAGE-LATEST"]
+
+
+def test_terraform_open_ingress_on_several_lines():
+    tf = """resource "aws_security_group" "web" {
+  ingress {
+    from_port   = 22
+    to_port     = 22
+    cidr_blocks = [
+      "0.0.0.0/0",
+    ]
+  }
+}
+"""
+    assert [f.rule_id for f in sast.analyze_file(SourceFile("main.tf", "terraform", tf))
+            if f.rule_id == "TF-OPEN-INGRESS"] == ["TF-OPEN-INGRESS"]
+
+
+def test_csharp_content_is_xss_only_as_html():
+    code = """public class C : Controller {
+    public IActionResult A(string q) {
+        return Content(q);
+    }
+    public IActionResult B(string q) {
+        return Content(q, "text/html");
+    }
+}
+"""
+    assert flows(code, "csharp") == [(6, "CS-XSS-FLOW")]

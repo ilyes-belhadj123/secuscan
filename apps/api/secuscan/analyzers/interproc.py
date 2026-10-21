@@ -18,7 +18,7 @@ from dataclasses import dataclass
 
 from ..ingest import SourceFile
 from .comments import without_block_comments
-from .taint import _TYPE, KINDS, MAX_LINE_LENGTH, SINKS, CallHit, ParamSink, find_flows, split_arguments
+from .taint import _TYPE, KINDS, MAX_LINE_LENGTH, SINKS, CallHit, ParamSink, find_flows, logical_lines, split_arguments
 
 MAX_ROUNDS = 4
 # Noms trop courants pour être reliés sans ambiguïté à une définition précise
@@ -99,14 +99,14 @@ def _body(lines: list[str], start: int, indent: str, language: str) -> tuple[int
 def extract_functions(source: SourceFile) -> list[Function]:
     lines = source.content.split("\n")
     out = []
-    for idx, line in enumerate(lines):
+    for _start, end, line in logical_lines(lines):  # signature sur plusieurs lignes : « def f(\n a,\n): »
         if len(line) > MAX_LINE_LENGTH:
             continue
         for pattern in _DEFS.get(source.language, ()):
             m = pattern.match(line)
             if not m or m.group(2) in _KEYWORDS:
                 continue
-            first_line, body = _body(lines, idx, m.group(1), source.language)
+            first_line, body = _body(lines, end, m.group(1), source.language)
             out.append(Function(m.group(2), _param_names(m.group(3), source.language), source, first_line,
                                 "\n".join(body)))
             break

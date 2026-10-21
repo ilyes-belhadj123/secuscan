@@ -29,11 +29,19 @@ from collections.abc import Callable
 from dataclasses import asdict, dataclass, field
 from pathlib import Path
 
-from .analyzers import external, history, interproc, sast, sca, secrets
+from .analyzers import config_secrets, external, history, interproc, sast, sca, secrets
 from .analyzers.context import enclosing_excerpt
 from .analyzers.rules import RULES_BY_ID
 from .config import Settings
-from .ingest import MANIFEST_FILES, SourceFile, collect_codebase, is_excluded, language_for_filename, manifest_kind
+from .ingest import (
+    CONFIG_LANGUAGE,
+    MANIFEST_FILES,
+    SourceFile,
+    collect_codebase,
+    is_excluded,
+    language_for_filename,
+    manifest_kind,
+)
 from .models import Finding, SecretInfo
 from .taxonomy import owasp_for
 
@@ -99,8 +107,10 @@ def _secrets(scan_id: str, codebase) -> tuple[list[Finding], dict[str, SourceFil
     redacted_files = {}
     # Les manifests peuvent aussi contenir des jetons (ex. registres privés)
     manifests = [SourceFile(m.path, MANIFEST_FILES[m.name], m.content) for m in codebase.manifests]
-    for source in codebase.files + manifests:
+    for source in codebase.files + manifests + codebase.configs:
         matches = secrets.find_secrets(source)
+        if source.language == CONFIG_LANGUAGE:  # « cle=valeur » sans guillemets
+            matches += config_secrets.find_config_secrets(source, matches)
         clean = secrets.redact(source, matches)
         redacted_files[source.path] = clean
         lines = clean.content.split("\n")
@@ -149,13 +159,16 @@ def _sast(scan_id: str, settings: Settings, redacted: dict, root: Path, existing
             severity=rule.severity, file=flow.sink.file, language=code_files[flow.sink.file].language,
             start_line=flow.sink.line, end_line=flow.sink.line,
         ))
-    # Moteurs externes (SS-5) : une ligne déjà signalée (règle maison ou secret) n'est pas dupliquée
+    # Moteurs externes (SS-5) : une ligne déjà signalée (règle maison ou secret) n'est pas dupliquée. La
+    # comparaison se fait par ligne et non par CWE : Bandit classe souvent la même faille sous un autre CWE
+    # (« debug=True » : CWE-94 pour Bandit, CWE-489 pour SecuScan)
     flagged = {(f.file, f.start_line) for f in existing} | {(r.file, r.start_line) for r in raws}
     raws += [r for r in _external_engines(settings, root, code_files) if (r.file, r.start_line) not in flagged]
 
     findings = []
     seen = set()
-    for raw in raws:
+    occurrences: dict[tuple[str, str, str], int] = {}
+    for raw in sorted(raws, key=lambda r: (r.file, r.start_line)):
         # Deux règles qui signalent la même faille (même CWE) sur la même ligne : une seule alerte
         key = (raw.cwe, raw.file, raw.start_line)
         if key in seen:
@@ -175,10 +188,19 @@ def _sast(scan_id: str, settings: Settings, redacted: dict, root: Path, existing
                 snippet=excerpt.code, snippet_start_line=excerpt.start_line,
                 cwe=raw.cwe, owasp=owasp_for(raw.cwe),
                 raw_severity=raw.severity, severity=raw.severity,
-                fingerprint=_fingerprint(raw.rule_id, raw.file, _normalize(lines[raw.start_line - 1])),
+                fingerprint=_occurrence_fingerprint(occurrences, raw.rule_id, raw.file, lines[raw.start_line - 1]),
             )
         )
     return findings
+
+
+def _occurrence_fingerprint(occurrences: dict, rule_id: str, file: str, line: str) -> str:
+    """Empreinte stable d'une alerte (règle + fichier + ligne normalisée). Une même ligne répétée dans le
+    fichier reçoit un rang : ignorer la première ne masque pas les suivantes. La première occurrence garde
+    l'empreinte d'origine (les alertes déjà ignorées le restent)."""
+    key = (rule_id, file, _normalize(line))
+    occurrences[key] = rank = occurrences.get(key, 0) + 1
+    return _fingerprint(*key) if rank == 1 else _fingerprint(*key, f"#{rank}")
 
 
 def _history_secrets(scan_id: str, history_file: Path, current: list[Finding], exclude: list[str]) -> list[Finding]:
@@ -217,7 +239,8 @@ def analyze_static(root: Path, settings: Settings, scan_id: str, exclude: list[s
     progress("Analyse statique (règles)", 0.3)
     findings += _sast(scan_id, settings, redacted, root, findings)
     return StaticResult(
-        files_scanned=len(codebase.files) + len(codebase.manifests), lines_scanned=codebase.line_count,
+        files_scanned=len(codebase.files) + len(codebase.manifests) + len(codebase.configs),
+        lines_scanned=codebase.line_count,
         languages=codebase.languages, vendored=codebase.vendored, findings=findings, redacted=redacted,
         dependencies=sca.parse_manifests(codebase.manifests),
     )

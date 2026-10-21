@@ -16,9 +16,14 @@ def _r(pattern: str, flags: int = 0) -> re.Pattern:
 
 
 _SENSITIVE_CONTEXT = _r(r"token|secret|password|passwd|reset|otp|session|key|nonce|reference", re.I)
-_SQL = r"(?i:SELECT|INSERT|UPDATE|DELETE)\b"
-# Clause SQL en milieu de chaîne (requête écrite sur plusieurs lignes par concaténation implicite)
-_SQL_CLAUSE = r"(?i:\bVALUES\b|\bWHERE\b|\bSET\b|\bFROM\b)"
+# Début de requête SQL : mot-clé en majuscules (« SELECT * » + …), ou structure SQL en minuscules
+# (« select x from », « insert into », « update t set », « delete from »). Pas un texte d'interface :
+# « Delete " + name + "? », « Select a file from the list ».
+_SQL = (r"(?:(?:SELECT|INSERT|UPDATE|DELETE)\b"
+        r"|select\s+(?:\*|[\w.]+(?:\s*,\s*[\w.]+)*)\s+from\s|insert\s+into\s|update\s+[\w.]+\s+set\s|delete\s+from\s)")
+# Clause SQL en milieu de chaîne (requête écrite sur plusieurs lignes par concaténation implicite) :
+# en majuscules seulement (« Message from %s » n'est pas du SQL)
+_SQL_CLAUSE = r"\b(?:VALUES|WHERE|SET|FROM)\b"
 
 C, H, M, L = Severity.critical, Severity.high, Severity.medium, Severity.low
 

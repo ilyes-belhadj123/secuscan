@@ -229,7 +229,8 @@ SINKS["csharp"] = [
     Sink("CS-PATH-FLOW", "path", _r(r"\bFile\.(ReadAllText|ReadAllBytes|ReadAllLines|OpenRead|Open|WriteAllText|Delete)\("
                                     r"|new\s+FileStream\(|\bPhysicalFile\(")),
     Sink("CS-REDIRECT-FLOW", "redirect", _r(r"(?<![\w.])Redirect(Permanent)?\(")),
-    Sink("CS-XSS-FLOW", "xss", _r(r"(?<![\w.])Content\(|\bHtml\.Raw\(|\.Response\.WriteAsync\(")),
+    # Content(x) renvoie du texte brut par défaut : XSS seulement avec un type « text/html »
+    Sink("CS-XSS-FLOW", "xss", _r(r"(?<![\w.])Content\((?=.*text/html)|\bHtml\.Raw\(|\.Response\.WriteAsync\(")),
 ]
 SINKS["go"] = [
     Sink("GO-SQLI-FLOW", "sql", _r(r"\.(QueryContext|QueryRowContext|ExecContext)\(\s*[^,]+,"
@@ -260,12 +261,95 @@ for table in (SOURCES, SANITIZERS, ASSIGN, SINKS, _PLAIN_STRINGS, _FUNCTION_STAR
     table["typescript"] = table["javascript"]
 
 
+# ---------------------------------------------------------------------- nettoyages par type de faille
+# Un nettoyage ne protège que de certaines failles : htmlspecialchars() rend une valeur sûre dans une
+# page HTML, pas dans une requête SQL ni une commande. Chaque entrée : fonctions, failles couvertes
+# (None : toutes, la valeur devient un nombre, un identifiant ou une empreinte).
+ALL_KINDS = frozenset(KINDS)
+# Encodage d'URL d'un composant : plus de ' " < ; / .. ni de « https:// » utilisable comme adresse
+_ENCODED = frozenset({"xss", "sql", "cmd", "path", "lfi", "ssrf", "redirect"})
+_ARGS = r"\s*\((?:[^()]|\((?:[^()]|\([^()]*\))*\))*\)"
+_SANITIZER_TABLE: dict[str, list[tuple[str, frozenset | None]]] = {
+    "python": [
+        (r"\b(?:int|float|bool|len|uuid\.UUID)" + _ARGS, None),
+        (r"\b(?:html\.escape|markupsafe\.escape|escape|bleach\.clean)" + _ARGS, frozenset({"xss"})),
+        (r"(?<![\w.])(?:quote|quote_plus|urllib\.parse\.quote|urllib\.parse\.quote_plus)" + _ARGS, _ENCODED),
+        (r"\bshlex\.quote" + _ARGS, frozenset({"cmd"})),
+        (r"\b(?:secure_filename|os\.path\.basename)" + _ARGS, frozenset({"path", "lfi"})),
+    ],
+    "javascript": [
+        (r"\b(?:parseInt|parseFloat|Number|Boolean)" + _ARGS, None),
+        (r"\bencodeURIComponent" + _ARGS, _ENCODED),
+        (r"\bencodeURI" + _ARGS, frozenset({"xss"})),
+        (r"\b(?:escapeHtml|escape|validator\.escape|DOMPurify\.sanitize|sanitizeHtml|he\.encode)" + _ARGS,
+         frozenset({"xss"})),
+        (r"\bpath\.basename" + _ARGS, frozenset({"path", "lfi"})),
+    ],
+    "php": [
+        (r"\b(?:intval|floatval|boolval|md5|sha1|hash|crc32|filter_var)" + _ARGS + r"|\(int\)\s*\$\w+", None),
+        (r"\b(?:htmlspecialchars|htmlentities|strip_tags)" + _ARGS, frozenset({"xss"})),
+        (r"\b(?:escapeshellarg|escapeshellcmd)" + _ARGS, frozenset({"cmd"})),
+        (r"\bbasename" + _ARGS, frozenset({"path", "lfi"})),
+        (r"\b(?:urlencode|rawurlencode)" + _ARGS, _ENCODED),
+        (r"\bmysqli_real_escape_string" + _ARGS + r"|\$\w+->(?:quote|real_escape_string)" + _ARGS,
+         frozenset({"sql"})),
+    ],
+    "java": [
+        (r"\b(?:Integer\.parseInt|Long\.parseLong|Integer\.valueOf|Long\.valueOf|UUID\.fromString)" + _ARGS, None),
+        (r"\bURLEncoder\.encode" + _ARGS, _ENCODED),
+        (r"\b(?:Encode\.forHtml\w*|HtmlUtils\.htmlEscape|StringEscapeUtils\.escapeHtml4)" + _ARGS,
+         frozenset({"xss"})),
+        (r"\bFilenameUtils\.getName" + _ARGS, frozenset({"path", "lfi"})),
+    ],
+    "csharp": [
+        (r"\b(?:int\.Parse|long\.Parse|Guid\.Parse|Convert\.ToInt32|Convert\.ToInt64)" + _ARGS, None),
+        (r"\b(?:HtmlEncoder\.Default\.Encode|WebUtility\.HtmlEncode|HttpUtility\.HtmlEncode)" + _ARGS,
+         frozenset({"xss"})),
+        (r"\bUri\.EscapeDataString" + _ARGS, _ENCODED),
+        (r"\bPath\.GetFileName" + _ARGS, frozenset({"path", "lfi"})),
+    ],
+    "go": [
+        (r"\bstrconv\.(?:Atoi|ParseInt|ParseUint|ParseFloat|ParseBool)" + _ARGS
+         # sortie d'un programme lancé sans shell : produite par le programme, pas par le client
+         + r"|exec\.Command(?:Context)?" + _ARGS + r"\.(?:Output|CombinedOutput)\(\)", None),
+        (r"\b(?:html\.EscapeString|template\.HTMLEscapeString)" + _ARGS, frozenset({"xss"})),
+        (r"\b(?:url\.PathEscape|url\.QueryEscape)" + _ARGS, _ENCODED),
+        (r"\b(?:filepath\.Base|path\.Base)" + _ARGS, frozenset({"path", "lfi"})),
+    ],
+}
+_SANITIZER_TABLE["typescript"] = _SANITIZER_TABLE["javascript"]
+# Langage → type de faille → nettoyages efficaces contre cette faille
+# Résultat d'une lecture (fichier, requête réseau, base de données, commande) : contenu produit par le
+# serveur, pas par le client, même si l'argument de la lecture venait de lui
+_RESULT_KINDS = {"sql", "cmd", "ssrf", "path", "lfi"}
+# Contrôle de préfixe suivi d'une sortie : « if (!target.startsWith(BASE + path.sep)) return … » protège
+# la variable contre la traversée de répertoire (groupe : nom de la variable)
+_PREFIX_GUARDS = {
+    "python": _r(r"\bif\s+not\s+(?:os\.path\.(?:realpath|abspath|normpath)\(\s*)?(\w+)\)?"
+                 r"(?:\.resolve\(\))?\.(?:startswith|is_relative_to)\("),
+    "javascript": _r(r"\bif\s*\(\s*!\s*(\w+)\.startsWith\("),
+    "php": _r(r"\bif\s*\(\s*(?:strpos\(\s*\$(\w+)\s*,[^)]*\)\s*!==\s*0|!\s*str_starts_with\(\s*\$(\w+))"),
+    "java": _r(r"\bif\s*\(\s*!\s*(\w+)(?:\.\w+\(\))*\.startsWith\("),
+    "csharp": _r(r"\bif\s*\(\s*!\s*(\w+)(?:\.\w+\(\))*\.StartsWith\("),
+    "go": _r(r"\bif\s+!strings\.HasPrefix\(\s*(\w+)\s*,"),
+}
+_PREFIX_GUARDS["typescript"] = _PREFIX_GUARDS["javascript"]
+_EXIT = _r(r"\b(return|throw|raise|abort|exit|die|continue)\b|http\.Error\(|\bres\.status\(\s*4")
+
+SANITIZERS_BY_KIND: dict[str, dict[str, re.Pattern]] = {
+    language: {kind: _r("|".join(f"(?:{pattern})" for pattern, kinds in entries if kinds is None or kind in kinds))
+               for kind in KINDS}
+    for language, entries in _SANITIZER_TABLE.items()
+}
+
+
 def split_arguments(text: str) -> list[str]:
     """Arguments d'un appel, `text` commençant juste après la parenthèse ouvrante."""
     args, depth, quote, start = [], 0, "", 0
     for i, ch in enumerate(text):
         if quote:
-            if ch == quote and text[i - 1] != "\\":
+            # guillemet non échappé : nombre pair d'antislashs juste avant (« "a\\" » se ferme)
+            if ch == quote and (i - len(text[:i].rstrip("\\"))) % 2 == 0:
                 quote = ""
         elif ch in "\"'`":
             quote = ch
@@ -297,10 +381,56 @@ def _names(target: str, language: str) -> list[str]:
     return [n.strip() for n in target.split(",") if n.strip()]
 
 
+
+# ---------------------------------------------------------------------- instructions sur plusieurs lignes
+# Code formaté (black, prettier…) : « cur.execute(\n    "SELECT …" + uid\n) ». Les lignes d'une même
+# instruction (parenthèse ou crochet encore ouvert) sont regroupées ; on s'arrête à l'ouverture d'un bloc
+# (« ) { », « => { », « : » en Python), sinon tout le corps d'un callback serait aspiré.
+MAX_JOINED_LINES = 25
+_BLOCK_START = _r(r"(\)|=>|\belse|\btry|\bdo|\bfinally)\s*\{\s*$|:\s*$")
+
+
+def _depth(line: str) -> int:
+    depth, quote, i = 0, "", 0
+    while i < len(line):
+        c = line[i]
+        if quote:
+            if c == "\\":
+                i += 1
+            elif c == quote:
+                quote = ""
+        elif c in "\"'`":
+            quote = c
+        elif c in "([":
+            depth += 1
+        elif c in ")]":
+            depth -= 1
+        elif c == "#" or line.startswith("//", i):
+            break  # commentaire de fin de ligne
+        i += 1
+    return depth
+
+
+def logical_lines(lines: list[str]):
+    """(index de la première ligne, index de la dernière, texte de l'instruction complète)."""
+    i, n = 0, len(lines)
+    while i < n:
+        start, text, depth = i, lines[i], _depth(lines[i])
+        while ((depth > 0 or lines[i].rstrip().endswith("\\")) and i + 1 < n and i - start < MAX_JOINED_LINES
+               and not _BLOCK_START.search(lines[i]) and len(text) < MAX_LINE_LENGTH):
+            i += 1
+            text = text.rstrip().rstrip("\\") + " " + lines[i].strip()
+            depth += _depth(lines[i])
+        yield start, i, text
+        i += 1
+
+
 class _Tainted:
     def __init__(self, language: str):
         self.language = language
         self.vars: dict[str, int] = {}  # nom → ligne où la donnée non fiable a été reçue
+        # nom → failles contre lesquelles la valeur n'a pas été nettoyée (absent : toutes)
+        self.kinds: dict[str, frozenset] = {}
         self.assigned: dict[str, int] = {}  # nom → dernière ligne où la variable a été construite
         self._patterns: dict[str, re.Pattern] = {}
 
@@ -309,21 +439,42 @@ class _Tainted:
             if self.language == "php":
                 self._patterns[name] = re.compile(r"\$" + re.escape(name) + r"\b")
             else:  # le nom seul, pas un appel « name( », un attribut « .name » ni une clé « name: »
-                self._patterns[name] = re.compile(r"(?<![\w$.])" + re.escape(name) + r"\b(?!\s*[(:])")
+                self._patterns[name] = re.compile(r"(?<![\w$.])" + re.escape(name) + r"\b(?!\s*\()")
         return self._patterns[name]
 
-    def first_hit(self, expr: str, line_no: int) -> tuple[str, int] | None:
-        """(variable ou « entrée utilisateur », ligne d'origine) si l'expression porte une donnée non fiable."""
+    def _mentions(self, name: str, expr: str) -> bool:
+        """La variable apparaît comme valeur : pas comme appel « name( », attribut « .name » ni clé d'objet
+        « { name: … } » (mais bien dans un ternaire « ok ? name : défaut »)."""
+        for m in self._pattern(name).finditer(expr):
+            if self.language != "php" and re.match(r"\s*:(?!:)", expr[m.end():]):
+                before = expr[:m.start()].rstrip()
+                if not before or before[-1] in "{,":
+                    continue
+            return True
+        return False
+
+    def first_hit(self, expr: str, line_no: int, kind: str | None = None) -> tuple[str, int] | None:
+        """(variable ou « entrée utilisateur », ligne d'origine) si l'expression porte une donnée non fiable
+        pour la faille `kind` (None : pour au moins une faille)."""
+        if kind is None:
+            return next((hit for k in KINDS if (hit := self.first_hit(expr, line_no, k))), None)
+        sanitizers = SANITIZERS_BY_KIND[self.language][kind]
         previous = None
         while previous != expr:  # nettoyages imbriqués : int(escape(x))
-            previous, expr = expr, SANITIZERS[self.language].sub("0", expr)
+            previous, expr = expr, sanitizers.sub("0", expr)
         if SOURCES[self.language].search(expr):
             return ("entrée utilisateur", line_no)
         expr = _strip_plain_strings(_PLAIN_STRINGS[self.language], expr)
         for name, origin in self.vars.items():
-            if self._pattern(name).search(expr):
+            if kind in self.kinds.get(name, ALL_KINDS) and self._mentions(name, expr):
                 return (name, origin)
         return None
+
+    def still_tainted(self, expr: str, line_no: int) -> tuple[tuple[str, int] | None, frozenset]:
+        """Pour une affectation : première origine non fiable, et failles pour lesquelles elle le reste."""
+        hits = {k: hit for k in KINDS if (hit := self.first_hit(expr, line_no, k))}
+        first = next(iter(hits.values()), None)
+        return first, frozenset(hits)
 
 
 def find_flows(source: SourceFile, initial: dict[str, int] | None = None, first_line: int = 1,
@@ -339,19 +490,27 @@ def find_flows(source: SourceFile, initial: dict[str, int] | None = None, first_
     tainted.vars.update(initial or {})
     findings: list[FlowFinding] = []
     controller = language == "csharp" and bool(_CS_CONTROLLER.search(source.content))
-    scope_indent = -1  # indentation du dernier début de fonction
-    for idx, line in enumerate(source.content.split("\n"), start=first_line):
+    # Portées ouvertes : (indentation, variables suivies juste avant cette fonction)
+    scopes: list[tuple[int, dict, dict]] = []
+    lines = source.content.split("\n")
+    for start, end, line in logical_lines(lines):
+        idx = first_line + start
         if not line.strip() or _COMMENT.match(line) or len(line) > MAX_LINE_LENGTH:
             continue
         defined = None
         if _FUNCTION_START[language].search(line):
             defined = (m.group(1) if (m := _DEFINED_NAME.search(line)) else None)
             indent = len(line) - len(line.lstrip())
-            # Fonction imbriquée (callback, closure) : elle voit les variables de la fonction qui
-            # l'entoure ; une fonction voisine ou de niveau supérieur repart de zéro
-            if scope_indent < 0 or indent <= scope_indent:
+            # Une fonction imbriquée (callback, closure) voit les variables de la fonction qui l'entoure. Une
+            # fonction voisine repart de l'état de la fonction englobante, pas de celui de sa voisine ; une
+            # fonction de premier niveau repart de zéro (ou des paramètres suivis, pour un corps résumé)
+            while scopes and scopes[-1][0] >= indent:
+                _, saved_vars, saved_kinds = scopes.pop()
+                tainted.vars, tainted.kinds = dict(saved_vars), dict(saved_kinds)
+            if not scopes and initial is None:
                 tainted.vars.clear()
-            scope_indent = indent
+                tainted.kinds.clear()
+            scopes.append((indent, dict(tainted.vars), dict(tainted.kinds)))
             if language == "java":
                 for m in _ANNOTATED_PARAM.finditer(line):
                     tainted.vars[m.group(4)] = idx
@@ -364,7 +523,7 @@ def find_flows(source: SourceFile, initial: dict[str, int] | None = None, first_
             if not m:
                 continue
             expr = _first_argument(line[m.end():]) if sink.first_arg else line[m.start():]
-            if hit := tainted.first_hit(expr, idx):
+            if hit := tainted.first_hit(expr, idx, sink.kind):
                 findings.append(FlowFinding(sink.rule_id, sink.kind, idx, hit[0], hit[1],
                                             tainted.assigned.get(hit[0], 0)))
                 flagged = True
@@ -375,20 +534,38 @@ def find_flows(source: SourceFile, initial: dict[str, int] | None = None, first_
                     continue
                 for param_sink in summaries.get(call.group(1), ()):
                     args = split_arguments(line[call.end():])
-                    if param_sink.param < len(args) and (hit := tainted.first_hit(args[param_sink.param], idx)):
+                    if param_sink.param < len(args) and (
+                            hit := tainted.first_hit(args[param_sink.param], idx, param_sink.kind)):
                         call_hits.append(CallHit(param_sink, idx, hit[0], hit[1]))
         if assign := ASSIGN[language].match(line):
             # Résultat d'une opération déjà signalée (sortie de la commande…) : pas d'alerte en cascade
-            safe = flagged or _ALLOWLIST.search(assign.group(2))
-            hit = None if safe else tainted.first_hit(assign.group(2), idx)
+            rhs = assign.group(2)
+            # (« r.URL.Query() » en Go lit l'entrée utilisateur : ce n'est pas le résultat d'une requête SQL)
+            reads = not SOURCES[language].search(rhs) and any(
+                s.kind in _RESULT_KINDS and s.pattern.search(rhs) for s in SINKS[language])
+            safe = flagged or reads or _ALLOWLIST.search(assign.group(2))
+            hit, kinds = (None, frozenset()) if safe else tainted.still_tainted(assign.group(2), idx)
             augmented = "+=" in line or ".=" in line
             for name in _names(assign.group(1), language):
                 if hit:
                     tainted.vars.setdefault(name, hit[1])
                     tainted.assigned[name] = idx
+                    # « $q .= $x » : la valeur cumule les failles possibles de ses morceaux
+                    previous = tainted.kinds.get(name, ALL_KINDS) if augmented and name in tainted.vars else frozenset()
+                    tainted.kinds[name] = kinds | previous
                 elif not augmented:
                     tainted.vars.pop(name, None)  # réaffectée avec une valeur sûre
+                    tainted.kinds.pop(name, None)
+        if (guard := _PREFIX_GUARDS[language].search(line)) and (
+                _EXIT.search(line[guard.end():]) or _EXIT.search(_next_code_line(lines, end))):
+            name = next(g for g in guard.groups() if g)
+            if name in tainted.vars:
+                tainted.kinds[name] = tainted.kinds.get(name, ALL_KINDS) - {"path", "lfi"}
     return findings
+
+
+def _next_code_line(lines: list[str], index: int) -> str:
+    return next((line for line in lines[index + 1:index + 3] if line.strip()), "")
 
 
 def describe(flow: FlowFinding) -> str:

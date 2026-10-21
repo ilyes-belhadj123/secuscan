@@ -78,21 +78,27 @@ def parse_bandit(report: dict, root: Path, min_level: str = "MEDIUM") -> list[Ra
     return findings
 
 
+BANDIT_BATCH = 200
+
+
 def run_bandit(root: Path, files: list[str]) -> list[RawFinding]:
     """Bandit sur les fichiers Python collectés (exclusions et dossiers ignorés déjà appliqués)."""
     if not files or not bandit_available():
         return []
-    with tempfile.TemporaryDirectory(prefix="secuscan-bandit-") as tmp:
-        out = Path(tmp) / "bandit.json"
-        cmd = [sys.executable, "-m", "bandit", "-q", "-f", "json", "-o", str(out), "--exit-zero",
-               *[str(root / f) for f in files]]
-        try:
-            subprocess.run(cmd, capture_output=True, timeout=ENGINE_TIMEOUT_SECONDS, check=False)
-            report = json.loads(out.read_text(encoding="utf-8")) if out.exists() else {}
-        except (subprocess.TimeoutExpired, OSError, json.JSONDecodeError) as exc:
-            log.warning("Bandit indisponible : %s", exc)
-            return []
-    return parse_bandit(report, root)
+    results: list = []
+    # Par lots : tous les chemins sur une seule ligne de commande dépasseraient la limite du système
+    # (32 Ko sous Windows) sur un gros dépôt, et Bandit ne tournerait pas du tout
+    for start in range(0, len(files), BANDIT_BATCH):
+        with tempfile.TemporaryDirectory(prefix="secuscan-bandit-") as tmp:
+            out = Path(tmp) / "bandit.json"
+            cmd = [sys.executable, "-m", "bandit", "-q", "-f", "json", "-o", str(out), "--exit-zero",
+                   *[str(root / f) for f in files[start:start + BANDIT_BATCH]]]
+            try:
+                subprocess.run(cmd, capture_output=True, timeout=ENGINE_TIMEOUT_SECONDS, check=False)
+                results += (json.loads(out.read_text(encoding="utf-8")) if out.exists() else {}).get("results", [])
+            except (subprocess.TimeoutExpired, OSError, json.JSONDecodeError) as exc:
+                log.warning("Bandit indisponible sur un lot de fichiers : %s", exc)
+    return parse_bandit({"results": results}, root)
 
 
 # ---------------------------------------------------------------------- SARIF générique
@@ -111,8 +117,10 @@ def _sarif_severity(rule: dict, result: dict) -> Severity:
         return _SARIF_LEVEL.get(level, Severity.medium)
 
 
-def parse_sarif(sarif: dict, known_files: dict[str, str], engine: str = "SARIF") -> list[RawFinding]:
+def parse_sarif(sarif: dict, known_files: dict[str, str], engine: str = "SARIF",
+                root: Path | None = None) -> list[RawFinding]:
     """`known_files` : chemin relatif → langage des fichiers collectés (les autres résultats sont ignorés)."""
+    root_prefix = (root.resolve().as_posix().lstrip("/") + "/") if root else ""
     findings = []
     for run in sarif.get("runs", []):
         driver = (run.get("tool") or {}).get("driver") or {}
@@ -128,6 +136,8 @@ def parse_sarif(sarif: dict, known_files: dict[str, str], engine: str = "SARIF")
             except (KeyError, IndexError, TypeError):
                 continue
             rel = re.sub(r"^(file://)?(\./)?", "", uri).replace("\\", "/")
+            if root_prefix and rel.lstrip("/").startswith(root_prefix):  # absolu : ramené au dossier analysé
+                rel = rel.lstrip("/")[len(root_prefix):]
             if rel not in known_files:
                 continue
             tags = " ".join((rule.get("properties") or {}).get("tags", []))
@@ -151,11 +161,12 @@ def run_opengrep(root: Path, rules_dir: str, known_files: dict[str, str]) -> lis
         return []
     with tempfile.TemporaryDirectory(prefix="secuscan-opengrep-") as tmp:
         out = Path(tmp) / "opengrep.sarif"
-        cmd = [binary, "scan", "--config", rules_dir, "--sarif", "--output", str(out), "--quiet", str(root)]
+        cmd = [binary, "scan", "--config", rules_dir, "--sarif",
+               "--output", str(out), "--quiet", "."]  # cible relative : chemins relatifs dans le SARIF
         try:
             subprocess.run(cmd, capture_output=True, timeout=ENGINE_TIMEOUT_SECONDS, check=False, cwd=root)
             sarif = json.loads(out.read_text(encoding="utf-8")) if out.exists() else {}
         except (subprocess.TimeoutExpired, OSError, json.JSONDecodeError) as exc:
             log.warning("Opengrep indisponible : %s", exc)
             return []
-    return parse_sarif(sarif, known_files, engine="Opengrep")
+    return parse_sarif(sarif, known_files, engine="Opengrep", root=root)

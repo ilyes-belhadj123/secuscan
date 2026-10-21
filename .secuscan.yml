@@ -9,3 +9,5 @@ exclude:
   - apps/api/secuscan/training_exercises.py # mode formation : code vulnérable à corriger, volontaire
   - apps/web/dist/                          # build généré
   - docs/
+  - .env                                    # réglages locaux du poste (exclus de Git) : clé IA saisie dans « Paramètres »
+  - apps/api/.env
