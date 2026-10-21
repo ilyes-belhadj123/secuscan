@@ -27,3 +27,4 @@ Thumbs.db
 
 # Build TypeScript
 *.tsbuildinfo
+requirements-audit.txt

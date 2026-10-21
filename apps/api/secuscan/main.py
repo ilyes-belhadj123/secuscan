@@ -47,6 +47,7 @@ async def lifespan(_app: FastAPI):
     settings = get_service().settings
     if settings.secuscan_production and (problems := settings.production_problems()):
         raise RuntimeError("Configuration de production incomplète : " + " ; ".join(problems))
+    get_service().recover_interrupted()
     yield
 
 

@@ -80,7 +80,7 @@ def test_checkout_then_webhook_activates_plan(api, service, stripe):
     assert owner.get("/api/billing").json()["plan"] == "free"
 
     event = {"id": "evt_1", "type": "checkout.session.completed", "data": {"object": {
-        "mode": "subscription", "customer": "cus_1", "subscription": "sub_1",
+        "mode": "subscription", "customer": "cus_1", "subscription": "sub_1", "payment_status": "paid",
         "metadata": {"org_id": org_id, "plan": "pro"}}}}
     assert _signed(owner, event).status_code == 200
     billing = owner.get("/api/billing").json()
@@ -142,3 +142,43 @@ def test_stripe_error_is_reported(api, service, stripe, monkeypatch):
     owner = register(api(), "jane.doe@example.com")
     resp = owner.post("/api/billing/plan", json={"plan": "pro"})
     assert resp.status_code == 502 and "Tarif inconnu" in resp.json()["detail"]
+
+
+def _checkout(org_id: str, event_id: str, status: str = "paid", kind: str = "checkout.session.completed",
+              subscription: str = "sub_1") -> dict:
+    return {"id": event_id, "type": kind, "data": {"object": {
+        "mode": "subscription", "customer": "cus_1", "subscription": subscription, "payment_status": status,
+        "metadata": {"org_id": org_id, "plan": "pro"}}}}
+
+
+def test_sepa_payment_activates_only_once_received(api, service, stripe):
+    owner = register(api(), "jane.doe@example.com")
+    org_id = owner.get("/api/auth/me").json()["org"]["id"]
+    assert _signed(owner, _checkout(org_id, "evt_1", status="unpaid")).json() == {"pending": True}
+    assert owner.get("/api/billing").json()["plan"] == "free"
+    _signed(owner, _checkout(org_id, "evt_2", kind="checkout.session.async_payment_succeeded"))
+    assert owner.get("/api/billing").json()["plan"] == "pro"
+
+
+def test_failed_processing_is_retried_by_stripe(api, service, stripe, monkeypatch):
+    owner = register(api(), "jane.doe@example.com")
+    org_id = owner.get("/api/auth/me").json()["org"]["id"]
+    real = stripe_billing.change_plan
+    monkeypatch.setattr(stripe_billing, "change_plan", lambda *a, **k: (_ for _ in ()).throw(RuntimeError("base")))
+    with pytest.raises(RuntimeError):
+        _signed(owner, _checkout(org_id, "evt_1"))
+    monkeypatch.setattr(stripe_billing, "change_plan", real)
+    assert _signed(owner, _checkout(org_id, "evt_1")).json() == {"ok": True}  # renvoi : traité, pas « doublon »
+    assert owner.get("/api/billing").json()["plan"] == "pro"
+
+
+def test_second_subscription_replaces_the_first(api, service, stripe):
+    owner = register(api(), "jane.doe@example.com")
+    org_id = owner.get("/api/auth/me").json()["org"]["id"]
+    _signed(owner, _checkout(org_id, "evt_1", subscription="sub_1"))
+    _signed(owner, _checkout(org_id, "evt_2", subscription="sub_2"))  # 2e onglet de paiement
+    assert ("DELETE", "/v1/subscriptions/sub_1", {}) in stripe.calls  # l'ancien n'est plus facturé
+    # La résiliation de l'ancien abonnement ne fait pas repasser l'organisation en Free
+    _signed(owner, {"id": "evt_3", "type": "customer.subscription.deleted",
+                    "data": {"object": {"id": "sub_1", "metadata": {"org_id": org_id}}}})
+    assert owner.get("/api/billing").json()["plan"] == "pro"

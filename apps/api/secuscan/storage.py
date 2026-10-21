@@ -487,14 +487,26 @@ class Storage:
                          "WHERE id = ?", (worker, time.time(), row[0]))
         return {"id": row[0], "scan_id": row[1], "payload": json.loads(row[2]), "attempts": row[3] + 1}
 
-    def heartbeat_job(self, job_id: str) -> None:
+    def heartbeat_job(self, job_id: str, worker: str | None = None) -> bool:
+        """Signe de vie ; False si la tâche n'appartient plus à ce worker (reprise par un autre)."""
         with self._lock, self._conn() as conn:
-            conn.execute("UPDATE jobs SET heartbeat = ? WHERE id = ?", (time.time(), job_id))
+            if worker is None:
+                cur = conn.execute("UPDATE jobs SET heartbeat = ? WHERE id = ?", (time.time(), job_id))
+            else:
+                cur = conn.execute("UPDATE jobs SET heartbeat = ? WHERE id = ? AND worker = ? AND status = 'running'",
+                                   (time.time(), job_id, worker))
+            return cur.rowcount > 0
 
-    def finish_job(self, job_id: str, status: str) -> None:
-        """Fin de tâche : la charge (accès Git chiffré, chemins) est effacée, seul le statut reste."""
+    def finish_job(self, job_id: str, status: str, worker: str | None = None) -> bool:
+        """Fin de tâche : la charge (accès Git chiffré, chemins) est effacée, seul le statut reste. Avec
+        `worker`, seulement si la tâche lui appartient encore (pas reprise entre-temps par un autre)."""
         with self._lock, self._conn() as conn:
-            conn.execute("UPDATE jobs SET status = ?, payload = '{}' WHERE id = ?", (status, job_id))
+            if worker is None:
+                cur = conn.execute("UPDATE jobs SET status = ?, payload = '{}' WHERE id = ?", (status, job_id))
+            else:
+                cur = conn.execute("UPDATE jobs SET status = ?, payload = '{}' WHERE id = ? AND worker = ?",
+                                   (status, job_id, worker))
+            return cur.rowcount > 0
 
     def stale_jobs(self, older_than: float) -> list[dict]:
         """Tâches « en cours » dont le worker ne donne plus signe de vie (arrêté, planté)."""
@@ -503,9 +515,14 @@ class Storage:
                                 (older_than,)).fetchall()
         return [{"id": r[0], "scan_id": r[1], "attempts": r[2]} for r in rows]
 
-    def requeue_job(self, job_id: str) -> None:
+    def requeue_job(self, job_id: str, older_than: float | None = None) -> bool:
+        """Remet en file ; avec `older_than`, seulement si le signe de vie est toujours ancien (vérifié dans
+        la même requête : un worker revenu entre-temps garde sa tâche)."""
         with self._lock, self._conn() as conn:
-            conn.execute("UPDATE jobs SET status = 'queued', worker = '' WHERE id = ? AND status = 'running'", (job_id,))
+            cur = conn.execute(
+                "UPDATE jobs SET status = 'queued', worker = '' WHERE id = ? AND status = 'running' AND heartbeat < ?",
+                (job_id, time.time() + 1 if older_than is None else older_than))
+            return cur.rowcount > 0
 
     def count_jobs(self, status: str) -> int:
         with self._conn() as conn:
@@ -528,6 +545,11 @@ class Storage:
         """True la première fois qu'un événement est reçu : Stripe peut renvoyer le même plusieurs fois."""
         with self._lock, self._conn() as conn:
             return conn.execute("INSERT OR IGNORE INTO stripe_events VALUES (?, ?)", (event_id, now_iso())).rowcount == 1
+
+    def forget_stripe_event(self, event_id: str) -> None:
+        """Traitement en échec : l'événement sera accepté quand Stripe le renverra."""
+        with self._lock, self._conn() as conn:
+            conn.execute("DELETE FROM stripe_events WHERE id = ?", (event_id,))
 
     # --- Consommation IA (plafonds mensuels) ---------------------------
     def add_ai_usage(self, org_id: str, source: str, tokens: int, calls: int, cost_usd: float,

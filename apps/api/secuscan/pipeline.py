@@ -97,6 +97,21 @@ class ScanService:
             payload["clone"] = {"url": clone.url, "branch": clone.branch, "auth": auth}
         self.storage.enqueue_job(scan.id, payload)
 
+    def recover_interrupted(self) -> int:
+        """Au démarrage de l'API, en mode « thread » : les analyses en cours ont été interrompues avec le
+        processus précédent. Elles passent en échec (au lieu de rester « en cours » à jamais) et le code
+        importé qu'elles avaient laissé est supprimé. En mode « worker », la file s'en charge."""
+        if self.settings.secuscan_queue != "thread":
+            return 0
+        interrupted = [s for s in self.storage.list_scans() if s.status in ("queued", "running")]
+        for scan in interrupted:
+            scan.status, scan.stage = "failed", "Échec"
+            scan.error = "Analyse interrompue par un redémarrage du serveur : relancez-la."
+            self.storage.save_scan(scan)
+        for leftover in self.settings.work_dir.glob("scan-*"):
+            remove_tree(leftover)
+        return len(interrupted)
+
     def _audit(self, scan: Scan, action: str, details: dict) -> None:
         self.storage.audit(action, scan.id, details, org_id=scan.org_id or "", actor=scan.created_by or "")
 

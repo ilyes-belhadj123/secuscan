@@ -143,22 +143,30 @@ class _Resolver:
         self.local = {key: defs[0] for key, defs in by_file.items() if len(defs) == 1}
         self.unique = {key: defs[0] for key, defs in by_name.items() if len(defs) == 1}
         self.functions = list(self.local.values())
-        # (fichier, nom) → résumés ; listes créées d'avance et complétées sur place (vues mises en cache)
+        # (fichier, nom) → résumés, complétés sur place au fil des tours
         self.summaries: dict[tuple[str, str], list[ParamSink]] = {key: [] for key in self.local}
-        self._views: dict[str, dict[str, list[ParamSink]]] = {}
-        self._local_names: dict[str, list[str]] = {}
-        for path, name in self.local:
-            self._local_names.setdefault(path, []).append(name)
 
-    def table(self, source: SourceFile) -> dict[str, list[ParamSink]]:
-        """Résumés visibles depuis un fichier, par nom de fonction appelée."""
-        if source.path not in self._views:
-            family = _FAMILY.get(source.language, source.language)
-            view = {name: self.summaries[(fn.source.path, name)]
-                    for (fam, name), fn in self.unique.items() if fam == family}
-            view.update({name: self.summaries[(source.path, name)] for name in self._local_names.get(source.path, ())})
-            self._views[source.path] = view
-        return self._views[source.path]
+    def table(self, source: SourceFile) -> "_View":
+        """Résumés visibles depuis un fichier, par nom de fonction appelée (vue sans copie : la mémoire
+        reste proportionnelle au nombre de fonctions, pas au nombre de fichiers × fonctions)."""
+        return _View(self, source.path, _FAMILY.get(source.language, source.language))
+
+
+class _View:
+    __slots__ = ("resolver", "path", "family")
+
+    def __init__(self, resolver: _Resolver, path: str, family: str):
+        self.resolver, self.path, self.family = resolver, path, family
+
+    def get(self, name: str, default=()):
+        summaries = self.resolver.summaries
+        if (self.path, name) in summaries:  # fonction du même fichier d'abord
+            return summaries[(self.path, name)]
+        fn = self.resolver.unique.get((self.family, name))
+        return summaries[(fn.source.path, name)] if fn else default
+
+    def __bool__(self) -> bool:
+        return True
 
 
 def cross_file_flows(code_files: list[SourceFile]) -> list[CrossFlow]:

@@ -88,6 +88,58 @@ def test_stale_job_is_retried_then_abandoned(queued):
     assert queued.storage.count_jobs("failed") == 1
 
 
+def test_thread_mode_fails_scans_interrupted_by_a_restart(service):
+    running = Scan(id=new_id(), project_name="Acme", source="upload", status="running")
+    done = Scan(id=new_id(), project_name="Acme", source="upload", status="completed")
+    for scan in (running, done):
+        service.storage.save_scan(scan)
+    leftover = Workspace(service.settings.work_dir)
+    (leftover.path / "app.py").write_text("x = 1", encoding="utf-8")
+    assert service.recover_interrupted() == 1
+    assert service.storage.get_scan(running.id).status == "failed"
+    assert "redémarrage" in service.storage.get_scan(running.id).error
+    assert service.storage.get_scan(done.id).status == "completed"
+    assert not leftover.path.exists()  # code importé supprimé
+
+
+def test_only_the_owner_finishes_or_keeps_a_job(queued):
+    storage = queued.storage
+    storage.enqueue_job("scan-1", {"root": "."})
+    job = storage.claim_job("w1")
+    assert storage.heartbeat_job(job["id"], "w1")
+    # Signe de vie récent : la tâche n'est pas reprise, même si la détection la croyait abandonnée
+    assert not storage.requeue_job(job["id"], older_than=time.time() - 600)
+    assert storage.requeue_job(job["id"], older_than=time.time() + 1)
+    assert storage.claim_job("w2")["id"] == job["id"]
+    # L'ancien worker ne peut plus ni signaler sa présence, ni terminer la tâche reprise par w2
+    assert not storage.heartbeat_job(job["id"], "w1")
+    assert not storage.finish_job(job["id"], "done", "w1")
+    assert storage.finish_job(job["id"], "done", "w2")
+
+
+def test_unreadable_job_fails_without_stopping_the_worker(queued):
+    scan = Scan(id=new_id(), project_name="Acme", source="upload", status="queued")
+    queued.storage.save_scan(scan)
+    queued.storage.enqueue_job(scan.id, {"root": ".", "clone": {"url": "https://example.com/r.git", "auth": "abîmé"}})
+    assert worker.process_one(queued, "w1") is True
+    failed = queued.storage.get_scan(scan.id)
+    assert failed.status == "failed" and "relancez" in failed.error
+    assert queued.storage.count_jobs("failed") == 1
+
+
+def test_worker_picks_up_ai_settings_changed_in_the_ui(queued):
+    from secuscan.config import refresh_ai_settings
+    env_file = queued.settings.secuscan_env_file
+    env_file.write_text("OPENROUTER_MODEL=anthropic/claude-haiku-5-5\n", encoding="utf-8")
+    assert refresh_ai_settings(queued.settings)
+    assert queued.settings.openrouter_model == "anthropic/claude-haiku-5-5"
+    assert not refresh_ai_settings(queued.settings)  # fichier inchangé : rien n'est relu
+    env_file.write_text("OPENROUTER_MODEL=anthropic/claude-sonnet-5-5\n", encoding="utf-8")
+    later = env_file.stat().st_mtime_ns + 10**9  # horloge de fichier grossière sous Windows
+    os.utime(env_file, ns=(later, later))
+    assert refresh_ai_settings(queued.settings) and queued.settings.openrouter_model == "anthropic/claude-sonnet-5-5"
+
+
 # ---------------------------------------------------------------------- SS-4 : isolation
 def test_static_result_round_trip(settings):
     result = analyze_static(DEMO_PROJECT_DIR, settings, "scan-x")

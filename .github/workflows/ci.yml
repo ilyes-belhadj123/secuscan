@@ -6,6 +6,14 @@ on:
   schedule:
     - cron: "0 2 * * *"  # benchmark nocturne (SS-8)
 
+# Jeton du workflow en lecture seule : aucun job n'écrit dans le dépôt
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
 jobs:
   api:
     runs-on: ubuntu-latest
@@ -15,9 +23,13 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - uses: astral-sh/setup-uv@v6
-      - run: uv sync
+      - run: uv sync --locked  # échoue si uv.lock n'est pas à jour (même versions que l'image Docker)
       - run: uv run ruff check .
       - run: uv run python -m pytest -q
+      - name: Vulnérabilités des dépendances Python de SecuScan
+        run: |
+          uv export --locked --no-dev --no-hashes --format requirements-txt > ../../requirements-audit.txt
+          uvx pip-audit --strict -r ../../requirements-audit.txt
 
   benchmark:
     runs-on: ubuntu-latest
@@ -27,7 +39,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - uses: astral-sh/setup-uv@v6
-      - run: uv sync
+      - run: uv sync --locked
       - name: Benchmark de détection (règles seules)
         run: uv run python -m secuscan.benchmark --min-recall 0.9
       - uses: actions/upload-artifact@v4
@@ -50,11 +62,12 @@ jobs:
         with:
           fetch-depth: 200  # historique : secrets supprimés du code mais encore dans les anciens commits
       - uses: astral-sh/setup-uv@v6
-      - run: uv sync
+      - run: uv sync --locked
       - name: Analyse SecuScan du dépôt
-        run: |
-          uv run python -m secuscan.cli scan ../.. --format sarif --output ../../secuscan.sarif
-          uv run python -m secuscan.cli scan ../.. --fail-on none >> "$GITHUB_STEP_SUMMARY"
+        run: uv run python -m secuscan.cli scan ../.. --format sarif --output ../../secuscan.sarif
+      - name: Résumé (affiché même si l'analyse bloque)
+        if: always()
+        run: uv run python -m secuscan.cli scan ../.. --fail-on none >> "$GITHUB_STEP_SUMMARY"
       - uses: actions/upload-artifact@v4
         if: always()
         with:
@@ -71,5 +84,23 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: 22
-      - run: npm install
+          cache: npm
+          cache-dependency-path: apps/web/package-lock.json
+      - run: npm ci
+      - run: npm audit --omit=dev --audit-level=high
       - run: npm run build
+
+  # Mise en ligne : l'image se construit, la pile démarre, le conteneur d'analyse est réellement isolé
+  docker:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Fichiers docker-compose valides
+        env:
+          SECUSCAN_DOMAIN: ci.example.com
+          DOCKER_GID: "999"
+        run: |
+          docker compose -f docker-compose.yml config -q
+          docker compose -f docker-compose.yml -f docker-compose.ephemeral.yml config -q
+      - name: Construction, démarrage et isolation
+        run: sh deploy/ci-smoke.sh

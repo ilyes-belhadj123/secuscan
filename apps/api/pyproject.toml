@@ -23,6 +23,11 @@ dependencies = [
     "defusedxml>=0.7.1",
     "tree-sitter-c-sharp>=0.23",
     "tree-sitter-go>=0.23",
+    # Pillow (logos réencodés, PDF) : version corrigée en production (Linux). Sur un poste Windows avec
+    # Smart App Control, la DLL de Pillow 13 encore trop récente est bloquée : version précédente en local
+    # uniquement, où seuls les logos de l'équipe sont traités. À retirer dès que Windows l'accepte.
+    "pillow>=13.0.0; sys_platform != 'win32'",
+    "pillow>=12.3,<13; sys_platform == 'win32'",
 ]
 
 [dependency-groups]

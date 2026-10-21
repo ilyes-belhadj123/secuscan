@@ -108,5 +108,7 @@ git pull && docker compose up -d --build
   dédiée (ARQ + Redis), sans changer l'interface `ScanService.submit`.
 - Le conteneur `sandbox` lit le code importé, mais le **clonage Git** se fait dans le worker (il a
   besoin du réseau). Git y est lancé sans hooks, sous-modules, LFS ni invite d'identifiants.
-- Ces fichiers Docker n'ont pas encore été construits et lancés sur un vrai serveur : à valider lors
-  de la première mise en ligne.
+- La CI (job « docker », script `deploy/ci-smoke.sh`) construit l'image à chaque push, démarre l'API et
+  le conteneur d'analyse, puis vérifie son isolation réelle (aucun réseau, système de fichiers en lecture
+  seule, utilisateur non root) et analyse la démo. Le HTTPS (Caddy) et le mode « un conteneur par
+  analyse » restent à valider sur le serveur, lors de la première mise en ligne.

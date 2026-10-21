@@ -223,6 +223,35 @@ class Settings(BaseSettings):
         return path
 
 
+# Réglages modifiables depuis l'écran « Paramètres » pendant que les processus tournent
+AI_RUNTIME_FIELDS = ("openrouter_api_key", "openrouter_model",
+                     "secuscan_ai_price_input_per_mtok", "secuscan_ai_price_output_per_mtok")
+_seen_settings_files: dict[int, int] = {}
+
+
+def refresh_ai_settings(settings: Settings) -> bool:
+    """Relit la clé et le modèle IA si le fichier écrit par l'écran « Paramètres » a changé.
+
+    L'API applique un changement à son propre processus ; un worker (SECUSCAN_QUEUE=worker) l'appelle
+    avant chaque tâche : une nouvelle clé, ou une clé révoquée après une fuite, s'applique sans
+    redémarrage. Les variables d'environnement gardent la priorité, comme au démarrage."""
+    path = settings.secuscan_env_file
+    try:
+        stamp = path.stat().st_mtime_ns
+    except OSError:
+        return False
+    if _seen_settings_files.get(id(settings)) == stamp:
+        return False
+    _seen_settings_files[id(settings)] = stamp
+    fresh = Settings(_env_file=path)
+    changed = False
+    for name in AI_RUNTIME_FIELDS:
+        if getattr(fresh, name) != getattr(settings, name):
+            setattr(settings, name, getattr(fresh, name))
+            changed = True
+    return changed
+
+
 @lru_cache
 def get_settings() -> Settings:
     settings = Settings()

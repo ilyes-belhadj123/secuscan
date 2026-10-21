@@ -160,6 +160,9 @@ def portal(ctx: Context = Depends(current_context), service: ScanService = Depen
     return {"url": session["url"]}
 
 
+# Paiement de l'abonnement confirmé (immédiat, ou différé pour un prélèvement SEPA)
+CHECKOUT_DONE = ("checkout.session.completed", "checkout.session.async_payment_succeeded")
+
 @router.post("/stripe/webhook")
 async def stripe_webhook(request: Request, service: ScanService = Depends(get_service)):
     settings, storage = service.settings, service.storage
@@ -167,17 +170,42 @@ async def stripe_webhook(request: Request, service: ScanService = Depends(get_se
     if not verify_stripe_signature(settings.secuscan_stripe_webhook_secret, body, request.headers.get("stripe-signature")):
         raise HTTPException(401, "Signature invalide")
     event = json.loads(body)
-    if not storage.first_stripe_event(str(event.get("id", ""))):
+    event_id = str(event.get("id", ""))
+    if not storage.first_stripe_event(event_id):
         return {"duplicate": True}
+    try:
+        return _handle_event(service, event)
+    except Exception:
+        # Échec (base verrouillée, réponse Stripe inattendue…) : Stripe renverra l'événement, qui ne doit
+        # pas être pris pour un doublon, sinon le paiement serait encaissé sans activer l'offre
+        storage.forget_stripe_event(event_id)
+        raise
+
+
+def _handle_event(service: ScanService, event: dict) -> dict:
+    settings, storage = service.settings, service.storage
     kind, obj = event.get("type"), (event.get("data") or {}).get("object") or {}
     org_id = str((obj.get("metadata") or {}).get("org_id") or obj.get("client_reference_id") or "")
     if not storage.get_org(org_id):
         return {"ignored": True}
     customer_id, subscription_id = storage.stripe_ids(org_id)
+    if kind in ("customer.subscription.updated", "customer.subscription.deleted") and subscription_id \
+            and obj.get("id") != subscription_id:
+        return {"ignored": True}  # ancien abonnement, déjà remplacé : sans effet sur l'offre actuelle
     try:
-        if kind == "checkout.session.completed" and obj.get("mode") == "subscription":
+        if kind in CHECKOUT_DONE and obj.get("mode") == "subscription":
+            if obj.get("payment_status") not in ("paid", "no_payment_required"):
+                return {"pending": True}  # prélèvement SEPA en cours : « async_payment_succeeded » suivra
             plan = str((obj.get("metadata") or {}).get("plan", ""))
-            storage.set_stripe_ids(org_id, str(obj.get("customer") or customer_id), str(obj.get("subscription") or ""))
+            new_subscription = str(obj.get("subscription") or "")
+            if subscription_id and new_subscription and subscription_id != new_subscription:
+                # Deux paiements lancés en parallèle : le dernier abonnement est gardé, l'autre résilié
+                try:
+                    _call(settings, "DELETE", f"/subscriptions/{subscription_id}")
+                except StripeError:
+                    storage.audit("billing.duplicate_subscription", org_id, {"subscription": subscription_id},
+                                  org_id=org_id, actor="Stripe")
+            storage.set_stripe_ids(org_id, str(obj.get("customer") or customer_id), new_subscription)
             if plan in ("pro", "business"):
                 change_plan(service, org_id, plan, actor="Stripe", provider=PROVIDER, invoice=False)
         elif kind == "customer.subscription.updated":
