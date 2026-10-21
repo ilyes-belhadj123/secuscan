@@ -1,4 +1,4 @@
-import type { ReactNode } from "react";
+import { useEffect, useState, type ReactNode } from "react";
 import {
   Bar, BarChart, CartesianGrid, Cell, LabelList, Line, LineChart, ResponsiveContainer, Tooltip, XAxis, YAxis,
 } from "recharts";
@@ -66,13 +66,26 @@ export function SeverityChart({
 }
 
 /** Une seule série : une seule teinte, pas de légende, valeurs en étiquettes directes. */
+/** Largeur des libellés : 430 px sur grand écran, moins sur un petit (les barres restent visibles). */
+function useAxisWidth(): number {
+  const compute = () => Math.max(160, Math.min(430, Math.round(window.innerWidth * 0.38)));
+  const [width, setWidth] = useState(compute);
+  useEffect(() => {
+    const onResize = () => setWidth(compute());
+    window.addEventListener("resize", onResize);
+    return () => window.removeEventListener("resize", onResize);
+  }, []);
+  return width;
+}
+
 export function OwaspChart({ byOwasp }: { byOwasp: Record<string, number> }) {
   const data = Object.entries(byOwasp).map(([label, value]) => ({ label, value }));
+  const axisWidth = useAxisWidth();
   return (
     <ResponsiveContainer width="100%" height={Math.max(120, data.length * 38)}>
       <BarChart data={data} layout="vertical" margin={{ top: 0, right: 40, bottom: 0, left: 4 }} barCategoryGap={8}>
         <XAxis type="number" hide allowDecimals={false} />
-        <YAxis type="category" dataKey="label" width={430} tick={axisTick} axisLine={{ stroke: "var(--axis)" }} tickLine={false} />
+        <YAxis type="category" dataKey="label" width={axisWidth} tick={axisTick} axisLine={{ stroke: "var(--axis)" }} tickLine={false} />
         <Tooltip
           cursor={{ fill: "var(--surface-2)" }}
           content={({ active, payload }) =>

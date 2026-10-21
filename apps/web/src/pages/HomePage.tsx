@@ -28,9 +28,13 @@ const EXTENSIONS = [
   { ext: "go", label: "Go" },
 ];
 
+const RECENT = 12;
+
 export default function HomePage({ health }: { health: Health | null }) {
   const navigate = useNavigate();
-  const [scans, setScans] = useState<Scan[]>([]);
+  const [scans, setScans] = useState<Scan[] | null>(null);
+  const [scansError, setScansError] = useState<string | null>(null);
+  const [showAll, setShowAll] = useState(false);
   const [busy, setBusy] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [quotaReached, setQuotaReached] = useState(false);
@@ -53,9 +57,27 @@ export default function HomePage({ health }: { health: Health | null }) {
   const [gitBranch, setGitBranch] = useState("");
   const fileInput = useRef<HTMLInputElement>(null);
 
+  // Liste rafraîchie tant qu'une analyse est en cours (son statut passe à « Terminée » sans recharger)
+  const running = (scans ?? []).some((s) => s.status === "queued" || s.status === "running");
   useEffect(() => {
-    api.scans().then(setScans).catch(() => setScans([]));
-  }, []);
+    let cancelled = false;
+    let timer: number | undefined;
+    function load() {
+      api.scans()
+        .then((list) => {
+          if (cancelled) return;
+          setScans(list);
+          setScansError(null);
+        })
+        .catch((e) => !cancelled && setScansError((e as Error).message));
+    }
+    load();
+    if (running) timer = window.setInterval(load, 3000);
+    return () => {
+      cancelled = true;
+      window.clearInterval(timer);
+    };
+  }, [running]);
 
   async function launch(kind: string, start: () => Promise<Scan>) {
     setBusy(kind);
@@ -71,7 +93,7 @@ export default function HomePage({ health }: { health: Health | null }) {
   }
 
   function onFile(file: File | undefined) {
-    if (!file) return;
+    if (!file || busy) return;  // pas de second envoi pendant le premier
     const name = projectName.trim() || file.name.replace(/\.zip$/i, "");
     launch("upload", () => api.upload(file, name));
   }
@@ -174,9 +196,17 @@ export default function HomePage({ health }: { health: Health | null }) {
             }}
             onDragLeave={() => setDragging(false)}
             onDrop={onDrop}
-            onClick={() => fileInput.current?.click()}
+            onClick={() => !busy && fileInput.current?.click()}
+            onKeyDown={(e) => {
+              if ((e.key === "Enter" || e.key === " ") && !busy) {
+                e.preventDefault();
+                fileInput.current?.click();
+              }
+            }}
             role="button"
             tabIndex={0}
+            aria-disabled={!!busy}
+            aria-label="Choisir une archive ZIP à analyser"
           >
             {busy === "upload" ? <span className="spinner" /> : "Déposez un .zip ici ou cliquez pour choisir"}
             <div className="small muted">100 Mo max · code supprimé après analyse</div>
@@ -186,7 +216,10 @@ export default function HomePage({ health }: { health: Health | null }) {
             type="file"
             accept=".zip"
             hidden
-            onChange={(e) => onFile(e.target.files?.[0])}
+            onChange={(e) => {
+              onFile(e.target.files?.[0]);
+              e.target.value = "";  // le même fichier pourra être choisi à nouveau après une erreur
+            }}
           />
         </div>
 
@@ -214,11 +247,23 @@ export default function HomePage({ health }: { health: Health | null }) {
         </div>
       </section>
 
-      {scans.length > 0 && (
+      {scansError && <div className="card error" role="alert">Analyses récentes indisponibles : {scansError}</div>}
+      {scans && scans.length === 0 && !scansError && (
+        <p className="muted" style={{ textAlign: "center" }}>
+          Aucune analyse pour l'instant : lancez la démonstration ou importez votre code ci-dessus.
+        </p>
+      )}
+      {scans && scans.length > 0 && (
         <section className="card">
           <div className="card-title">
             <h2>Analyses récentes</h2>
+            {scans.length > RECENT && (
+              <button className="btn btn-ghost small" type="button" onClick={() => setShowAll((v) => !v)}>
+                {showAll ? "Afficher les plus récentes" : `Voir toutes les analyses (${scans.length})`}
+              </button>
+            )}
           </div>
+          <div className="table-scroll">
           <table className="scan-list">
             <thead>
               <tr>
@@ -230,12 +275,17 @@ export default function HomePage({ health }: { health: Health | null }) {
               </tr>
             </thead>
             <tbody>
-              {scans.slice(0, 12).map((s) => (
+              {(showAll ? scans : scans.slice(0, RECENT)).map((s) => (
                 <tr key={s.id} style={{ cursor: "pointer" }} onClick={() => navigate(`/scans/${s.id}`)}>
-                  <td style={{ fontWeight: 600 }}>{s.project_name}</td>
+                  <td style={{ fontWeight: 600 }}>
+                    <Link to={`/scans/${s.id}`} onClick={(e) => e.stopPropagation()} style={{ color: "inherit" }}>
+                      {s.project_name}
+                    </Link>
+                  </td>
                   <td className="secondary">{formatDate(s.created_at)}</td>
                   <td>
-                    {s.status === "completed" ? "Terminée" : s.status === "failed" ? "Échec" : "En cours…"}
+                    {s.status === "completed" ? "Terminée" : s.status === "failed" ? "Échec"
+                      : s.status === "queued" ? "En attente…" : "En cours…"}
                   </td>
                   <td style={{ textAlign: "right" }}>{s.status === "completed" ? s.summary.total : "—"}</td>
                   <td style={{ textAlign: "right", fontWeight: 650 }}>
@@ -245,6 +295,7 @@ export default function HomePage({ health }: { health: Health | null }) {
               ))}
             </tbody>
           </table>
+          </div>
         </section>
       )}
     </main>

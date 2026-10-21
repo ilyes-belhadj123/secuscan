@@ -70,9 +70,10 @@ export default function TrainingPage() {
       </section>
 
       <div className="filters">
-        <button className={`chip ${!language ? "active" : ""}`} onClick={() => setLanguage(null)}>Tous</button>
+        <button className={`chip ${!language ? "active" : ""}`} onClick={() => setLanguage(null)} aria-pressed={!language}>Tous</button>
         {languages.map((l) => (
-          <button key={l} className={`chip ${language === l ? "active" : ""}`} onClick={() => setLanguage(l)}>
+          <button key={l} className={`chip ${language === l ? "active" : ""}`} onClick={() => setLanguage(l)}
+                  aria-pressed={language === l}>
             {LANGUAGE_LABEL[l] ?? l}
           </button>
         ))}

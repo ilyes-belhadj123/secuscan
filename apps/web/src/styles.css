@@ -5,7 +5,7 @@
   --surface-2: #f3f3f0;
   --text: #0b0b0b;
   --text-2: #52514e;
-  --muted: #898781;
+  --muted: #6b6a65;
   --grid: #e1e0d9;
   --axis: #c3c2b7;
   --border: rgba(11, 11, 11, 0.1);
@@ -18,6 +18,9 @@
   --sev-high: #ec835a;
   --sev-medium: #fab219;
   --sev-low: #898781;
+  /* Texte coloré lisible (contraste >= 4,5:1) : les teintes ci-dessus servent aux pastilles et barres */
+  --sev-high-text: #b5481f;
+  --sev-medium-text: #8a5a00;
   --code-bg: #f6f6f3;
   --code-hl: rgba(208, 59, 59, 0.12);
   --add-bg: rgba(12, 163, 12, 0.12);
@@ -35,8 +38,10 @@
     --surface-2: #232321;
     --text: #ffffff;
     --text-2: #c3c2b7;
-    --muted: #898781;
+    --muted: #a3a29b;
     --grid: #2c2c2a;
+    --sev-high-text: #f2a080;
+    --sev-medium-text: #fcc84a;
     --axis: #383835;
     --border: rgba(255, 255, 255, 0.1);
     --brand: #3b82f6;
@@ -61,18 +66,24 @@ code, pre, .mono { font-family: ui-monospace, "Cascadia Code", Consolas, monospa
 
 /* ---------- layout */
 .topbar {
-  display: flex; align-items: center; gap: 16px; padding: 12px 28px;
+  display: flex; align-items: center; gap: 10px 16px; padding: 12px 28px; flex-wrap: wrap;
   background: var(--surface); border-bottom: 1px solid var(--border); position: sticky; top: 0; z-index: 10;
 }
 .logo { display: flex; align-items: center; gap: 8px; font-weight: 750; font-size: 16px; color: var(--text); }
 .logo:hover { text-decoration: none; }
 .topbar .spacer { flex: 1; }
+.nav-link { font-weight: 600; }
 .container { max-width: 1240px; margin: 0 auto; padding: 28px; }
 .stack { display: flex; flex-direction: column; gap: 20px; }
 .row { display: flex; gap: 12px; align-items: center; flex-wrap: wrap; }
 .grid-2 { display: grid; grid-template-columns: 1fr 1fr; gap: 20px; }
 .grid-3 { display: grid; grid-template-columns: repeat(3, 1fr); gap: 20px; }
-@media (max-width: 900px) { .grid-2, .grid-3 { grid-template-columns: 1fr; } }
+.grid-score { grid-template-columns: minmax(0, 0.9fr) minmax(0, 1.1fr); }
+@media (max-width: 900px) { .grid-2, .grid-3, .grid-score { grid-template-columns: 1fr; } }
+/* Tableau plus large que l'écran : il défile, la page ne déborde pas */
+.table-scroll { overflow-x: auto; }
+.table-scroll > table { min-width: 640px; }
+@media (max-width: 640px) { .topbar { padding: 10px 14px; } .container { padding: 16px; } }
 
 .card {
   background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius);
@@ -158,7 +169,9 @@ label.field { display: flex; flex-direction: column; gap: 4px; font-weight: 600;
   font-size: 26px; font-weight: 800; border: 2px solid var(--border);
 }
 .kpis { display: grid; grid-template-columns: repeat(6, 1fr); gap: 12px; }
-@media (max-width: 900px) { .kpis { grid-template-columns: repeat(2, 1fr); } }
+.kpis.kpis-3 { grid-template-columns: repeat(3, 1fr); }
+.kpis.kpis-4 { grid-template-columns: repeat(4, 1fr); }
+@media (max-width: 900px) { .kpis, .kpis.kpis-3, .kpis.kpis-4 { grid-template-columns: repeat(2, 1fr); } }
 .kpi { background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius); padding: 14px 16px; }
 .kpi .label { font-size: 12px; color: var(--text-2); font-weight: 600; }
 .kpi .value { font-size: 28px; font-weight: 700; margin-top: 2px; }

@@ -1,18 +1,14 @@
 import { useCallback, useEffect, useState } from "react";
-import { Link, useNavigate, useParams } from "react-router-dom";
+import { Link, useLocation, useNavigate, useParams } from "react-router-dom";
 import { api, type Finding } from "../api";
 import { SeverityBadge, VerdictBadge } from "../components/Badges";
 import { CodeView, DiffView } from "../components/Code";
 import FixFeedback from "../components/FixFeedback";
-import { KIND_LABEL, LANGUAGE_LABEL, SEVERITY_LABEL } from "../labels";
+import Modal from "../components/Modal";
+import { DISMISS_REASONS, KIND_LABEL, LANGUAGE_LABEL, SEVERITY_LABEL } from "../labels";
+import { copyText, safeHref } from "../utils";
 
 type Tab = "understand" | "fix" | "refs";
-
-const DISMISS_REASONS = [
-  { value: "false_positive", label: "Faux positif" },
-  { value: "accepted_risk", label: "Risque accepté" },
-  { value: "not_applicable", label: "Non applicable (code mort, test…)" },
-];
 
 function DismissModal({ onClose, onDone, finding }: { onClose: () => void; onDone: (f: Finding) => void; finding: Finding }) {
   const [reason, setReason] = useState("false_positive");
@@ -32,9 +28,7 @@ function DismissModal({ onClose, onDone, finding }: { onClose: () => void; onDon
   }
 
   return (
-    <div className="modal-backdrop" onClick={onClose}>
-      <div className="modal stack" onClick={(e) => e.stopPropagation()} role="dialog" aria-modal="true">
-        <h2>Ignorer cette alerte</h2>
+    <Modal title="Ignorer cette alerte" onClose={onClose}>
         <p className="secondary small" style={{ margin: 0 }}>
           L'alerte sera masquée dans les prochaines analyses de ce projet. L'action est tracée dans le journal d'audit.
         </p>
@@ -62,14 +56,15 @@ function DismissModal({ onClose, onDone, finding }: { onClose: () => void; onDon
             Confirmer
           </button>
         </div>
-      </div>
-    </div>
+    </Modal>
   );
 }
 
 export default function FindingPage() {
   const { scanId = "", findingId = "" } = useParams();
   const navigate = useNavigate();
+  // Alertes affichées dans la liste (filtres et recherche de la page d'analyse), dans le même ordre
+  const listIds = (useLocation().state as { ids?: string[] } | null)?.ids ?? null;
   const [finding, setFinding] = useState<Finding | null>(null);
   const [siblings, setSiblings] = useState<Finding[]>([]);
   const [tab, setTab] = useState<Tab>("understand");
@@ -78,21 +73,37 @@ export default function FindingPage() {
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
+    let cancelled = false;
     setFinding(null);
-    api.finding(findingId).then(setFinding).catch((e) => setError((e as Error).message));
+    setError(null);
+    api.finding(findingId)
+      .then((f) => !cancelled && setFinding(f))
+      .catch((e) => !cancelled && setError((e as Error).message));
+    return () => {
+      cancelled = true;
+    };
   }, [findingId]);
 
   useEffect(() => {
     api.findings(scanId).then(setSiblings).catch(() => setSiblings([]));
   }, [scanId]);
 
-  // Navigation entre alertes de même statut
-  const group = siblings.filter((f) => f.status === (finding?.status ?? "open"));
+  // Navigation dans la liste filtrée venue de la page d'analyse (sinon : alertes de même statut). Une alerte
+  // ignorée reste dans la liste, pour que « suivante » continue de fonctionner pendant le tri.
+  const byId = new Map(siblings.map((f) => [f.id, f]));
+  const group = listIds
+    ? listIds.map((id) => byId.get(id)).filter((f): f is Finding => !!f)
+    : siblings.filter((f) => f.status === (finding?.status ?? "open"));
   const index = group.findIndex((f) => f.id === findingId);
   const prev = index > 0 ? group[index - 1] : null;
   const next = index >= 0 && index < group.length - 1 ? group[index + 1] : null;
+  const ids = group.map((f) => f.id);
 
-  const go = useCallback((f: Finding | null) => f && navigate(`/scans/${scanId}/findings/${f.id}`), [navigate, scanId]);
+  const go = useCallback(
+    (f: Finding | null) => f && navigate(`/scans/${scanId}/findings/${f.id}`, { state: { ids } }),
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [navigate, scanId, ids.join(",")],
+  );
 
   useEffect(() => {
     function onKey(e: KeyboardEvent) {
@@ -199,7 +210,7 @@ export default function FindingPage() {
                     <tr key={a.id}>
                       <td style={{ width: 110 }}><SeverityBadge severity={a.severity} /></td>
                       <td>
-                        <a href={a.url} target="_blank" rel="noreferrer">{a.aliases[0] ?? a.id}</a>
+                        <a href={safeHref(a.url)} target="_blank" rel="noreferrer">{a.aliases[0] ?? a.id}</a>
                         <div className="small secondary">{a.summary}</div>
                       </td>
                     </tr>
@@ -216,10 +227,13 @@ export default function FindingPage() {
         </div>
 
         <div className="card">
-          <div className="tabs" role="tablist">
-            <button className={`tab ${tab === "understand" ? "active" : ""}`} onClick={() => setTab("understand")}>Comprendre</button>
-            <button className={`tab ${tab === "fix" ? "active" : ""}`} onClick={() => setTab("fix")}>Corriger</button>
-            <button className={`tab ${tab === "refs" ? "active" : ""}`} onClick={() => setTab("refs")}>Références</button>
+          <div className="tabs" role="tablist" aria-label="Détail de l'alerte">
+            {([["understand", "Comprendre"], ["fix", "Corriger"], ["refs", "Références"]] as [Tab, string][]).map(([id, label]) => (
+              <button key={id} role="tab" aria-selected={tab === id} className={`tab ${tab === id ? "active" : ""}`}
+                      onClick={() => setTab(id)}>
+                {label}
+              </button>
+            ))}
           </div>
 
           {tab === "understand" && (
@@ -257,10 +271,10 @@ export default function FindingPage() {
                   <div className="row">
                     <button
                       className="btn btn-primary"
-                      onClick={() => navigator.clipboard.writeText(fix.patched_code).then(() => {
+                      onClick={() => copyText(fix.patched_code).then(() => {
                         flash("Correctif copié");
                         api.fixCopied(finding.id).catch(() => undefined);
-                      })}
+                      }, (e) => flash((e as Error).message))}
                     >
                       ⧉ Copier le code corrigé
                     </button>
@@ -288,7 +302,7 @@ export default function FindingPage() {
             <div className="stack" style={{ gap: 10 }}>
               <ul className="tight">
                 {(exp?.references ?? []).map((r) => (
-                  <li key={r}><a href={r} target="_blank" rel="noreferrer">{r}</a></li>
+                  <li key={r}><a href={safeHref(r)} target="_blank" rel="noreferrer">{r}</a></li>
                 ))}
               </ul>
               <div className="small secondary">
@@ -314,7 +328,9 @@ export default function FindingPage() {
             setFinding(f);
             setShowDismiss(false);
             setSiblings((list) => list.map((x) => (x.id === f.id ? f : x)));
-            flash("Alerte ignorée");
+            // Tri des alertes : on passe directement à la suivante de la liste
+            flash(next ? "Alerte ignorée — alerte suivante" : "Alerte ignorée");
+            if (next) window.setTimeout(() => go(next), 600);
           }}
         />
       )}

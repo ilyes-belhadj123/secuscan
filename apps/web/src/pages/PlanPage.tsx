@@ -23,7 +23,7 @@ function Meter({ label, used, max }: { label: string; used: number; max: number 
           <div className="progress-fill" style={{ width: `${Math.max(2, ratio * 100)}%`, background: color }} />
         </div>
       )}
-      {state && <div className="hint" style={{ color }}>{state === "atteint" ? "▲ Limite atteinte" : "● Limite presque atteinte"}</div>}
+      {state && <div className="hint" style={{ color: state === "atteint" ? color : "var(--sev-medium-text)" }}>{state === "atteint" ? "▲ Limite atteinte" : "● Limite presque atteinte"}</div>}
     </div>
   );
 }
@@ -106,6 +106,11 @@ export default function PlanPage() {
   }
 
   async function select(plan: PlanId) {
+    // Sans paiement en ligne, le changement est immédiat (et émet une facture) : on confirme d'abord
+    const offer = billing?.catalog.find((o) => o.id === plan);
+    if (billing?.provider !== "stripe" && !window.confirm(`Passer à l'offre ${offer?.name ?? plan} ? Le changement est immédiat.`)) {
+      return;
+    }
     setBusy(true);
     setError(null);
     setNotice(null);
@@ -155,7 +160,7 @@ export default function PlanPage() {
       {error && <div className="card error" role="alert">{error}</div>}
       {notice && <div className="ai-note" role="status"><span aria-hidden>✓</span><span>{notice}</span></div>}
 
-      <section className="kpis" style={{ gridTemplateColumns: "repeat(3, 1fr)" }}>
+      <section className="kpis kpis-3">
         <Meter label="Analyses ce mois-ci" used={u.scans_this_month} max={billing.limits.monthly_scans} />
         <Meter label="Projets" used={u.projects} max={billing.limits.projects} />
         <Meter label="Membres (invitations comprises)" used={u.members + u.pending_invitations} max={billing.limits.members} />

@@ -1,7 +1,9 @@
 import { useEffect, useMemo, useState } from "react";
 import { Link } from "react-router-dom";
 import { api, type AuditEntry } from "../api";
-import { formatDate } from "../labels";
+import { DISMISS_REASON_LABEL, ROLE_LABEL, formatDate } from "../labels";
+
+const roleLabel = (role: unknown) => (ROLE_LABEL as Record<string, string>)[String(role)]?.toLowerCase() ?? String(role);
 
 const ACTIONS: Record<string, { label: string; icon: string }> = {
   "scan.created": { label: "Analyse lancée", icon: "▶" },
@@ -20,14 +22,8 @@ const ACTIONS: Record<string, { label: string; icon: string }> = {
   "git.disconnected": { label: "Compte Git déconnecté", icon: "⊘" },
 };
 
-const ROLES: Record<string, string> = { owner: "propriétaire", admin: "administrateur", member: "membre" };
 
 const SOURCES: Record<string, string> = { demo: "projet de démo", upload: "archive ZIP", snippet: "extrait collé", git: "dépôt Git" };
-const REASONS: Record<string, string> = {
-  false_positive: "faux positif",
-  accepted_risk: "risque accepté",
-  not_applicable: "non applicable",
-};
 
 function describe(e: AuditEntry): string {
   const d = e.details;
@@ -39,17 +35,17 @@ function describe(e: AuditEntry): string {
     case "scan.failed":
       return String(d.error ?? "");
     case "finding.dismissed":
-      return `${d.title} (${d.location}) · ${REASONS[String(d.reason)] ?? d.reason} — « ${d.justification} »`;
+      return `${d.title} (${d.location}) · ${DISMISS_REASON_LABEL[String(d.reason)] ?? d.reason} — « ${d.justification} »`;
     case "report.exported": {
       const extra = [d.prepared_for && `pour ${d.prepared_for}`, d.prepared_by && `par ${d.prepared_by}`].filter(Boolean);
       return `Format ${String(d.format).toUpperCase()}${extra.length ? ` · ${extra.join(" · ")}` : ""}`;
     }
     case "member.invited":
-      return `${d.email} · ${ROLES[String(d.role)] ?? d.role}`;
+      return `${d.email} · ${roleLabel(d.role)}`;
     case "member.joined":
-      return `${d.email} · ${ROLES[String(d.role)] ?? d.role} (${d.via})`;
+      return `${d.email} · ${roleLabel(d.role)} (${d.via})`;
     case "member.role_changed":
-      return `${ROLES[String(d.from)] ?? d.from} → ${ROLES[String(d.to)] ?? d.to}`;
+      return `${roleLabel(d.from)} → ${roleLabel(d.to)}`;
     case "member.removed":
       return d.self ? "Départ volontaire" : "Retiré par un administrateur";
     case "member.invitation_revoked":
@@ -90,15 +86,16 @@ export default function AuditPage() {
       {error && <div className="card error">{error}</div>}
       <section className="card stack">
         <div className="filters">
-          <button className={`chip ${!filter ? "active" : ""}`} onClick={() => setFilter(null)}>Tout</button>
+          <button className={`chip ${!filter ? "active" : ""}`} onClick={() => setFilter(null)} aria-pressed={!filter}>Tout</button>
           {Object.entries(ACTIONS).map(([key, a]) => (
-            <button key={key} className={`chip ${filter === key ? "active" : ""}`} onClick={() => setFilter(key)}>
+            <button key={key} className={`chip ${filter === key ? "active" : ""}`} onClick={() => setFilter(key)}
+                    aria-pressed={filter === key}>
               {a.label}
             </button>
           ))}
         </div>
         {entries === null ? (
-          <span className="spinner" />
+          error ? null : <span className="spinner" />
         ) : visible.length === 0 ? (
           <p className="muted">Aucune entrée.</p>
         ) : (
@@ -113,11 +110,11 @@ export default function AuditPage() {
               </tr>
             </thead>
             <tbody>
-              {visible.map((e, i) => {
+              {visible.map((e) => {
                 const a = ACTIONS[e.action] ?? { label: e.action, icon: "·" };
                 const scanLink = e.action.startsWith("scan.") || e.action === "report.exported";
                 return (
-                  <tr key={i}>
+                  <tr key={`${e.ts}-${e.action}-${e.target}`}>
                     <td className="secondary small">{formatDate(e.ts)}</td>
                     <td>
                       <span className="badge"><span aria-hidden>{a.icon}</span>{a.label}</span>

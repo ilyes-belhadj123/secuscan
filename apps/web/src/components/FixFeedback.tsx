@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { api, type FixVerdict } from "../api";
 
 const OPTIONS: { verdict: FixVerdict; label: string; icon: string }[] = [
@@ -12,12 +12,17 @@ export default function FixFeedback({ findingId }: { findingId: string }) {
   const [verdict, setVerdict] = useState<FixVerdict | null>(null);
   const [comment, setComment] = useState("");
   const [saved, setSaved] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const current = useRef(findingId);  // une réponse tardive ne s'applique pas à l'alerte suivante
 
   useEffect(() => {
+    current.current = findingId;
     setVerdict(null);
+    setComment("");
     setSaved(false);
+    setError(null);
     api.fixFeedback(findingId).then((f) => {
-      if (f) {
+      if (f && current.current === findingId) {
         setVerdict(f.verdict);
         setComment(f.comment);
         setSaved(true);
@@ -26,9 +31,16 @@ export default function FixFeedback({ findingId }: { findingId: string }) {
   }, [findingId]);
 
   async function choose(v: FixVerdict) {
+    const id = findingId;
     setVerdict(v);
     setSaved(false);
-    await api.sendFixFeedback(findingId, v, comment).then(() => setSaved(true)).catch(() => undefined);
+    setError(null);
+    try {
+      await api.sendFixFeedback(id, v, comment);
+      if (current.current === id) setSaved(true);
+    } catch (e) {
+      if (current.current === id) setError(`Retour non enregistré : ${(e as Error).message}`);
+    }
   }
 
   return (
@@ -43,6 +55,7 @@ export default function FixFeedback({ findingId }: { findingId: string }) {
         ))}
         {saved && <span className="small muted">Merci, retour enregistré.</span>}
       </div>
+      {error && <div className="error small">{error}</div>}
       {verdict && (
         <div className="row" style={{ flexWrap: "nowrap", marginTop: 6 }}>
           <input value={comment} onChange={(e) => setComment(e.target.value)} maxLength={1000}

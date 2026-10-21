@@ -31,7 +31,7 @@ export default function CostsPage() {
         </p>
       </div>
 
-      <section className="kpis" style={{ gridTemplateColumns: "repeat(3, 1fr)" }}>
+      <section className="kpis kpis-3">
         <div className="kpi">
           <div className="label">Coût total estimé</div>
           <div className="value">{formatUsd(costs.total_cost_usd)}</div>
@@ -50,6 +50,10 @@ export default function CostsPage() {
       </section>
 
       <section className="card">
+        {costs.scans.length === 0 ? (
+          <p className="muted" style={{ margin: 0 }}>Aucune analyse terminée pour l'instant : les coûts apparaîtront ici.</p>
+        ) : (
+        <div className="table-scroll">
         <table className="findings-table">
           <thead>
             <tr>
@@ -67,7 +71,7 @@ export default function CostsPage() {
               <tr key={s.id}>
                 <td>
                   <Link to={`/scans/${s.id}`}>{s.project_name}</Link>
-                  {s.budget_refused > 0 && <div className="small" style={{ color: "var(--sev-high)" }}>⚠ budget atteint ({s.budget_refused} alerte(s) sans IA)</div>}
+                  {s.budget_refused > 0 && <div className="small" style={{ color: "var(--sev-high-text)" }}>⚠ budget atteint ({s.budget_refused} alerte(s) sans IA)</div>}
                 </td>
                 <td className="secondary small">{formatDate(s.created_at)}</td>
                 <td className="mono small" style={{ textAlign: "right" }}>{s.lines.toLocaleString("fr-FR")}</td>
@@ -81,6 +85,8 @@ export default function CostsPage() {
             ))}
           </tbody>
         </table>
+        </div>
+        )}
       </section>
     </main>
   );

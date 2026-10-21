@@ -1,8 +1,12 @@
-import { useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { Link, useNavigate, useParams } from "react-router-dom";
-import { api, type Finding, type FindingKind, type FindingStatus, type HistoryPoint, type Scan, type Severity } from "../api";
+import {
+  ApiError, NETWORK_ERROR, api, downloadFile, splitSourceUrl,
+  type Finding, type FindingKind, type FindingStatus, type HistoryPoint, type Scan, type Severity,
+} from "../api";
 import { SeverityBadge, VerdictBadge } from "../components/Badges";
 import { OwaspChart, ScoreHistoryChart, SeverityChart } from "../components/Charts";
+import Modal from "../components/Modal";
 import { useSession } from "../session";
 import {
   KIND_LABEL, LANGUAGE_LABEL, SEVERITIES, SEVERITY_LABEL, formatDate, formatTokens, formatUsd, grade,
@@ -18,17 +22,23 @@ const BASE_STEPS = [
   "Calcul du score",
 ];
 
-function Progress({ scan }: { scan: Scan }) {
+function Progress({ scan, reconnecting }: { scan: Scan; reconnecting: boolean }) {
   const STEPS = scan.source === "git" ? ["Clonage du dépôt", ...BASE_STEPS] : BASE_STEPS;
   const current = STEPS.findIndex((s) => scan.stage.startsWith(s));
+  const queued = scan.status === "queued";
   return (
     <div className="card stack" style={{ maxWidth: 640, margin: "40px auto" }}>
       <div>
-        <h2>Analyse de « {scan.project_name} » en cours</h2>
+        <h2>{queued ? `Analyse de « ${scan.project_name} » en file d'attente` : `Analyse de « ${scan.project_name} » en cours`}</h2>
         <p className="secondary" style={{ margin: "4px 0 0" }}>
-          Le code est analysé sans jamais être exécuté, puis supprimé à la fin de l'analyse.
+          {queued
+            ? "Démarrage imminent : l'analyse commence dès qu'un moteur d'analyse se libère."
+            : "Le code est analysé sans jamais être exécuté, puis supprimé à la fin de l'analyse."}
         </p>
       </div>
+      {reconnecting && (
+        <div className="warning-box" role="status">Connexion perdue, nouvelle tentative… L'analyse continue sur le serveur.</div>
+      )}
       <div className="progress-track" role="progressbar" aria-valuenow={Math.round(scan.progress * 100)}>
         <div className="progress-fill" style={{ width: `${Math.max(3, scan.progress * 100)}%` }} />
       </div>
@@ -73,14 +83,24 @@ export default function ScanPage() {
   const [statusFilter, setStatusFilter] = useState<StatusFilter>("open");
   const [query, setQuery] = useState("");
   const [showExport, setShowExport] = useState(false);
+  const [reconnecting, setReconnecting] = useState(false);
+  const [attempt, setAttempt] = useState(0);  // « Réessayer » relance le suivi
+  const [jsonState, setJsonState] = useState<"idle" | "busy" | string>("idle");
 
   useEffect(() => {
     let timer: number | undefined;
     let cancelled = false;
+    let failures = 0;
+    setScan(null);
+    setFindings([]);
+    setHistory([]);
+    setError(null);
     async function poll() {
       try {
         const s = await api.scan(scanId);
         if (cancelled) return;
+        failures = 0;
+        setReconnecting(false);
         setScan(s);
         if (s.status === "completed") {
           const [f, h] = await Promise.all([api.findings(scanId), api.history(scanId)]);
@@ -92,7 +112,16 @@ export default function ScanPage() {
           timer = window.setTimeout(poll, 700);
         }
       } catch (e) {
-        if (!cancelled) setError((e as Error).message);
+        if (cancelled) return;
+        // Coupure passagère (réseau, serveur redémarré) : on réessaie en espaçant, l'analyse continue
+        if (e instanceof ApiError && (e.status === NETWORK_ERROR || e.status >= 500) && failures < 8) {
+          failures += 1;
+          setReconnecting(true);
+          timer = window.setTimeout(poll, Math.min(10_000, 1000 * 2 ** failures));
+        } else {
+          setReconnecting(false);
+          setError((e as Error).message);
+        }
       }
     }
     poll();
@@ -100,7 +129,20 @@ export default function ScanPage() {
       cancelled = true;
       window.clearTimeout(timer);
     };
-  }, [scanId]);
+  }, [scanId, attempt]);
+
+  const retry = useCallback(() => setAttempt((n) => n + 1), []);
+  const closeExport = useCallback(() => setShowExport(false), []);
+
+  async function downloadJson() {
+    setJsonState("busy");
+    try {
+      await downloadFile(api.reportUrl(scanId, "json"), `secuscan-${scanId}.json`);
+      setJsonState("idle");
+    } catch (e) {
+      setJsonState((e as Error).message);
+    }
+  }
 
   const visible = useMemo(() => {
     const q = query.trim().toLowerCase();
@@ -113,7 +155,15 @@ export default function ScanPage() {
     );
   }, [findings, sevFilter, kindFilter, statusFilter, query]);
 
-  if (error) return <main className="container"><div className="card error">{error}</div></main>;
+  if (error)
+    return (
+      <main className="container">
+        <div className="card stack">
+          <p className="error" style={{ margin: 0 }}>{error}</p>
+          <div><button className="btn" onClick={retry}>Réessayer</button></div>
+        </div>
+      </main>
+    );
   if (!scan) return <main className="container"><span className="spinner" /></main>;
   if (scan.status === "failed")
     return (
@@ -125,10 +175,14 @@ export default function ScanPage() {
         </div>
       </main>
     );
-  if (scan.status !== "completed") return <main className="container"><Progress scan={scan} /></main>;
+  if (scan.status !== "completed")
+    return <main className="container"><Progress scan={scan} reconnecting={reconnecting} /></main>;
+  const source = scan.source_url ? splitSourceUrl(scan.source_url) : null;
 
   const s = scan.summary;
   const score = scan.score ?? 0;
+  const visibleIds = visible.map((v) => v.id);
+  const findingUrl = (f: Finding) => `/scans/${scan.id}/findings/${f.id}`;
   const counts = {
     open: findings.filter((f) => f.status === "open").length,
     false_positive: s.false_positives,
@@ -141,10 +195,11 @@ export default function ScanPage() {
         <div>
           <Link to="/" className="small">← Toutes les analyses</Link>
           <h1 style={{ marginTop: 4 }}>{scan.project_name}</h1>
-          {scan.source_url && (
-            <a className="small mono" href={scan.source_url.split("@")[0]} target="_blank" rel="noreferrer">
-              {scan.source_url}
-            </a>
+          {source && (
+            <div className="small">
+              <a className="mono" href={source.url} target="_blank" rel="noreferrer">{source.url}</a>
+              {source.branch && <span className="secondary"> · branche <span className="mono">{source.branch}</span></span>}
+            </div>
           )}
           <div className="secondary small">
             Analysé le {formatDate(scan.completed_at ?? scan.created_at)} · {s.files_scanned} fichiers ·{" "}
@@ -159,13 +214,16 @@ export default function ScanPage() {
             </div>
           )}
         </div>
-        <div className="row">
-          <a className="btn" href={api.reportUrl(scan.id, "json")} download>
-            ⤓ JSON
-          </a>
-          <button className="btn btn-primary" onClick={() => setShowExport(true)}>
-            ⤓ Rapport PDF
-          </button>
+        <div className="stack" style={{ gap: 6, alignItems: "flex-end" }}>
+          <div className="row">
+            <button className="btn" onClick={downloadJson} disabled={jsonState === "busy"}>
+              {jsonState === "busy" ? <span className="spinner" /> : "⤓"} JSON
+            </button>
+            <button className="btn btn-primary" onClick={() => setShowExport(true)}>
+              ⤓ Rapport PDF
+            </button>
+          </div>
+          {jsonState !== "idle" && jsonState !== "busy" && <span className="error small">{jsonState}</span>}
         </div>
       </div>
 
@@ -176,7 +234,7 @@ export default function ScanPage() {
         </div>
       )}
 
-      <section className="grid-2" style={{ gridTemplateColumns: "minmax(0,0.9fr) minmax(0,1.1fr)" }}>
+      <section className="grid-2 grid-score">
         <div className="card stack">
           <div className="hero-score">
             <div>
@@ -244,6 +302,7 @@ export default function ScanPage() {
           <h2>Alertes</h2>
           <input
             placeholder="Rechercher (fichier, CWE, règle…)"
+            aria-label="Rechercher dans les alertes"
             value={query}
             onChange={(e) => setQuery(e.target.value)}
             style={{ maxWidth: 280 }}
@@ -251,25 +310,28 @@ export default function ScanPage() {
         </div>
         <div className="filters">
           {(["open", "false_positive", "dismissed"] as StatusFilter[]).map((st) => (
-            <button key={st} className={`chip ${statusFilter === st ? "active" : ""}`} onClick={() => setStatusFilter(st)}>
+            <button key={st} className={`chip ${statusFilter === st ? "active" : ""}`} onClick={() => setStatusFilter(st)}
+                    aria-pressed={statusFilter === st}>
               {st === "open" ? "Ouvertes" : st === "false_positive" ? "Écartées par l'IA" : "Ignorées"} ({counts[st]})
             </button>
           ))}
           <span className="muted">|</span>
-          <button className={`chip ${!sevFilter ? "active" : ""}`} onClick={() => setSevFilter(null)}>
+          <button className={`chip ${!sevFilter ? "active" : ""}`} onClick={() => setSevFilter(null)} aria-pressed={!sevFilter}>
             Toutes sévérités
           </button>
           {SEVERITIES.map((sev) => (
-            <button key={sev} className={`chip ${sevFilter === sev ? "active" : ""}`} onClick={() => setSevFilter(sev)}>
+            <button key={sev} className={`chip ${sevFilter === sev ? "active" : ""}`} onClick={() => setSevFilter(sev)}
+                    aria-pressed={sevFilter === sev}>
               {SEVERITY_LABEL[sev]}
             </button>
           ))}
           <span className="muted">|</span>
-          <button className={`chip ${!kindFilter ? "active" : ""}`} onClick={() => setKindFilter(null)}>
+          <button className={`chip ${!kindFilter ? "active" : ""}`} onClick={() => setKindFilter(null)} aria-pressed={!kindFilter}>
             Tous types
           </button>
           {(["sast", "ai", "secret", "dependency"] as FindingKind[]).map((k) => (
-            <button key={k} className={`chip ${kindFilter === k ? "active" : ""}`} onClick={() => setKindFilter(k)}>
+            <button key={k} className={`chip ${kindFilter === k ? "active" : ""}`} onClick={() => setKindFilter(k)}
+                    aria-pressed={kindFilter === k}>
               {KIND_LABEL[k]}
             </button>
           ))}
@@ -278,6 +340,7 @@ export default function ScanPage() {
         {visible.length === 0 ? (
           <p className="muted">Aucune alerte pour ces filtres.</p>
         ) : (
+          <div className="table-scroll">
           <table className="findings-table">
             <thead>
               <tr>
@@ -293,11 +356,14 @@ export default function ScanPage() {
                 <tr
                   key={f.id}
                   className={`clickable ${f.status !== "open" ? "faded" : ""}`}
-                  onClick={() => navigate(`/scans/${scan.id}/findings/${f.id}`, { state: { ids: visible.map((v) => v.id) } })}
+                  onClick={() => navigate(findingUrl(f), { state: { ids: visibleIds } })}
                 >
                   <td><SeverityBadge severity={f.severity} /></td>
                   <td>
-                    <div className="title">{f.title}</div>
+                    {/* Vrai lien : clavier, clic du milieu, nouvel onglet */}
+                    <Link className="title" to={findingUrl(f)} state={{ ids: visibleIds }} onClick={(e) => e.stopPropagation()}>
+                      {f.title}
+                    </Link>
                     <div className="loc mono">{f.file}:{f.start_line}</div>
                   </td>
                   <td className="secondary">{KIND_LABEL[f.kind]}</td>
@@ -313,9 +379,10 @@ export default function ScanPage() {
               ))}
             </tbody>
           </table>
+          </div>
         )}
       </section>
-      {showExport && <ExportModal scanId={scan.id} onClose={() => setShowExport(false)} />}
+      {showExport && <ExportModal scanId={scan.id} onClose={closeExport} />}
     </main>
   );
 }
@@ -328,10 +395,25 @@ function ExportModal({ scanId, onClose }: { scanId: string; onClose: () => void 
   const whiteLabel = me?.org.features.includes("white_label") ?? false;
   const [preparedFor, setPreparedFor] = useState("");
   const [preparedBy, setPreparedBy] = useState(() => (whiteLabel ? localStorage.getItem(PREPARED_BY_KEY) ?? "" : ""));
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  async function download() {
+    setBusy(true);
+    setError(null);
+    localStorage.setItem(PREPARED_BY_KEY, preparedBy.trim());
+    try {
+      await downloadFile(api.reportUrl(scanId, "pdf", { preparedFor, preparedBy }), `secuscan-${scanId}.pdf`);
+      onClose();
+    } catch (e) {
+      setError((e as Error).message);
+    } finally {
+      setBusy(false);
+    }
+  }
+
   return (
-    <div className="modal-backdrop" onClick={onClose}>
-      <div className="modal stack" onClick={(e) => e.stopPropagation()} role="dialog" aria-modal="true">
-        <h2>Exporter le rapport PDF</h2>
+    <Modal title="Exporter le rapport PDF" onClose={onClose}>
         <label className="field">
           Préparé pour (client, facultatif)
           <input value={preparedFor} onChange={(e) => setPreparedFor(e.target.value)} placeholder="Ex. Acme Corp" maxLength={120} />
@@ -346,21 +428,13 @@ function ExportModal({ scanId, onClose }: { scanId: string; onClose: () => void 
             ? "Si « Réalisé par » est renseigné, le rapport est en marque blanche : votre nom remplace SecuScan."
             : <>La marque blanche est incluse dans l'offre Business. <Link to="/offre">Voir les offres</Link></>}
         </p>
+        {error && <p className="error small" style={{ margin: 0 }}>{error}</p>}
         <div className="row" style={{ justifyContent: "flex-end" }}>
           <button className="btn btn-ghost" onClick={onClose}>Annuler</button>
-          <a
-            className="btn btn-primary"
-            href={api.reportUrl(scanId, "pdf", { preparedFor, preparedBy })}
-            download
-            onClick={() => {
-              localStorage.setItem(PREPARED_BY_KEY, preparedBy.trim());
-              window.setTimeout(onClose, 300);
-            }}
-          >
-            ⤓ Télécharger
-          </a>
+          <button className="btn btn-primary" onClick={download} disabled={busy}>
+            {busy ? <><span className="spinner" /> Préparation du rapport…</> : "⤓ Télécharger"}
+          </button>
         </div>
-      </div>
-    </div>
+    </Modal>
   );
 }

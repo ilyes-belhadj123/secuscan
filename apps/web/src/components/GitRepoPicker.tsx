@@ -56,8 +56,11 @@ export default function GitRepoPicker({ onLaunch, busy }: {
           p.connected ? (
             <span key={p.id} className="badge" title={`Connecté en tant que ${p.login}`}>
               ✓ {p.name} · {p.login}
-              <button className="btn btn-ghost small" style={{ padding: "0 4px" }}
-                      onClick={() => api.gitDisconnect(p.id).then(() => { setProvider(""); setRepos(null); load(); })}>
+              {/* type="button" : placé dans le formulaire du dépôt public, il ne doit pas lancer d'analyse */}
+              <button className="btn btn-ghost small" style={{ padding: "0 4px" }} type="button"
+                      onClick={() => api.gitDisconnect(p.id)
+                        .then(() => { setProvider(""); setRepos(null); load(); })
+                        .catch((e) => setError((e as Error).message))}>
                 Déconnecter
               </button>
             </span>

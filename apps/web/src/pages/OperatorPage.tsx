@@ -1,18 +1,17 @@
 import { useEffect, useState } from "react";
 import { Link } from "react-router-dom";
 import { api, type OperatorDashboard } from "../api";
-import { formatDate } from "../labels";
+import { KIND_LABEL, formatDate } from "../labels";
 
 const pct = (v: number | null) => (v === null ? "—" : `${Math.round(v * 100)} %`);
 const VERDICT = { applied: "Appliqué", helpful: "Utile", not_helpful: "Pas utile" } as const;
-const KIND = { sast: "Code", ai: "Logique (IA)", secret: "Secret", dependency: "Dépendance" } as Record<string, string>;
 
 function Goal({ label, value, goal, ok }: { label: string; value: string; goal: string; ok: boolean | null }) {
   return (
     <div className="kpi">
       <div className="label">{label}</div>
       <div className="value">{value}</div>
-      <div className="hint" style={{ color: ok === null ? undefined : ok ? "var(--good-text)" : "var(--sev-high)" }}>
+      <div className="hint" style={{ color: ok === null ? undefined : ok ? "var(--good-text)" : "var(--sev-high-text)" }}>
         {ok === null ? "pas encore de données" : ok ? "✓ objectif atteint" : "● objectif non atteint"} · objectif {goal}
       </div>
     </div>
@@ -41,7 +40,7 @@ export default function OperatorPage() {
         </p>
       </div>
 
-      <section className="kpis" style={{ gridTemplateColumns: "repeat(4, 1fr)" }}>
+      <section className="kpis kpis-4">
         <Goal label="Équipes pilotes actives" value={`${t.active} / ${t.organizations}`} goal="10" ok={t.organizations ? t.active >= 10 : null} />
         <Goal label="Revenues la semaine suivante" value={String(t.returned)} goal="≥ 5" ok={t.active ? t.returned >= 5 : null} />
         <Goal label="Correctifs acceptés" value={pct(t.acceptance_rate)} goal="> 50 %"
@@ -84,7 +83,7 @@ export default function OperatorPage() {
           <table className="findings-table">
             <tbody>
               {Object.entries(data.acceptance_by_kind).map(([kind, v]) => (
-                <tr key={kind}><td>{KIND[kind] ?? kind}</td>
+                <tr key={kind}><td>{(KIND_LABEL as Record<string, string>)[kind] ?? kind}</td>
                   <td style={{ textAlign: "right" }}>{v.accepted} / {v.total}</td>
                   <td style={{ textAlign: "right", fontWeight: 650 }}>{pct(v.total ? v.accepted / v.total : null)}</td></tr>
               ))}

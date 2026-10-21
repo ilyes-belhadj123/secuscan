@@ -40,6 +40,34 @@ function highlightLine(line: string, language: string | null): string {
   return hljs.highlight(line || " ", { language: lang, ignoreIllegals: true }).value;
 }
 
+/** Colore le bloc entier (commentaires « /* … *\/ », docstrings et chaînes sur plusieurs lignes restent
+ *  justes), puis le découpe en lignes : les balises ouvertes sont refermées en fin de ligne et rouvertes
+ *  au début de la suivante. Le texte reste celui échappé par highlight.js. */
+export function highlightLines(code: string, language: string | null): string[] {
+  if (!language) return code.split("\n").map((l) => escapeHtml(l) || " ");
+  const lang = language === "php" ? "php" : language;
+  const html = hljs.highlight(code, { language: lang, ignoreIllegals: true }).value;
+  const lines: string[] = [];
+  const open: string[] = [];
+  let current = "";
+  for (const token of html.split(/(<span[^>]*>|<\/span>|\n)/)) {
+    if (token === "\n") {
+      lines.push((current + "</span>".repeat(open.length)) || " ");
+      current = open.join("");
+    } else if (token.startsWith("<span")) {
+      open.push(token);
+      current += token;
+    } else if (token === "</span>") {
+      open.pop();
+      current += token;
+    } else {
+      current += token;
+    }
+  }
+  lines.push(current || " ");
+  return lines;
+}
+
 function escapeHtml(text: string): string {
   return text.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
 }
@@ -55,7 +83,7 @@ interface CodeViewProps {
 
 export function CodeView({ file, language, code, startLine, highlightFrom, highlightTo }: CodeViewProps) {
   const lang = highlightLanguage(file, language);
-  const lines = useMemo(() => code.split("\n").map((l) => highlightLine(l, lang)), [code, lang]);
+  const lines = useMemo(() => highlightLines(code, lang), [code, lang]);
   return (
     <div className="code-view">
       <div className="file mono">{file}</div>

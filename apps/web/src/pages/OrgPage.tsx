@@ -2,10 +2,10 @@ import { useCallback, useEffect, useState, type FormEvent } from "react";
 import { Link, useNavigate } from "react-router-dom";
 import { api, type OrgDetails, type Role } from "../api";
 import LogoCard from "../components/LogoCard";
-import { formatDate } from "../labels";
+import { ROLE_LABEL, formatDate } from "../labels";
 import { isAdmin, useSession } from "../session";
+import { copyText } from "../utils";
 
-const ROLE_LABEL: Record<Role, string> = { owner: "Propriétaire", admin: "Administrateur", member: "Membre" };
 
 export default function OrgPage() {
   const { me, refresh, logout } = useSession();
@@ -17,6 +17,7 @@ export default function OrgPage() {
   const [inviteUrl, setInviteUrl] = useState<string | null>(null);
   const [inviteMail, setInviteMail] = useState<{ sent: boolean; detail: string } | null>(null);
   const [copied, setCopied] = useState(false);
+  const [inviting, setInviting] = useState(false);
   const admin = isAdmin(me);
 
   const load = useCallback(() => {
@@ -36,6 +37,8 @@ export default function OrgPage() {
 
   async function invite(e: FormEvent) {
     e.preventDefault();
+    if (inviting) return;
+    setInviting(true);
     await run(async () => {
       const inv = await api.invite(email, role);
       setInviteUrl(inv.url);
@@ -43,10 +46,24 @@ export default function OrgPage() {
       setCopied(false);
       setEmail("");
     });
+    setInviting(false);
+  }
+
+  function changeRole(memberId: string, name: string, next: Role) {
+    const warning = next === "owner"
+      ? `Transférer la propriété de l'organisation à ${name} ? Vous ne pourrez plus gérer l'offre ni le paiement.`
+      : `Changer le rôle de ${name} en « ${ROLE_LABEL[next]} » ?`;
+    if (window.confirm(warning)) run(() => api.changeRole(memberId, next));
+  }
+
+  function remove(memberId: string, name: string) {
+    if (window.confirm(`Retirer ${name} de l'organisation ? Ses sessions seront fermées immédiatement.`)) {
+      run(() => api.removeMember(memberId));
+    }
   }
 
   async function leave() {
-    if (!me) return;
+    if (!me || !window.confirm("Quitter cette organisation ? Vous n'aurez plus accès à ses analyses.")) return;
     await run(() => api.removeMember(me.user.id));
     const next = await refresh();
     if (!next) {
@@ -79,7 +96,9 @@ export default function OrgPage() {
               <option value="member">Membre</option>
               <option value="admin">Administrateur</option>
             </select>
-            <button className="btn btn-primary" type="submit" style={{ whiteSpace: "nowrap" }}>Créer l'invitation</button>
+            <button className="btn btn-primary" type="submit" style={{ whiteSpace: "nowrap" }} disabled={inviting}>
+              {inviting ? <span className="spinner" /> : null} Créer l'invitation
+            </button>
           </form>
           {inviteUrl && (
             <div className="ai-note" style={{ flexDirection: "column", gap: 6 }}>
@@ -91,7 +110,7 @@ export default function OrgPage() {
               <div className="row" style={{ flexWrap: "nowrap" }}>
                 <input readOnly value={inviteUrl} className="mono small" onFocus={(e) => e.target.select()} />
                 <button className="btn" type="button"
-                        onClick={() => navigator.clipboard.writeText(inviteUrl).then(() => setCopied(true))}>
+                        onClick={() => copyText(inviteUrl).then(() => setCopied(true), (e) => setError((e as Error).message))}>
                   {copied ? "✓ Copié" : "⧉ Copier"}
                 </button>
               </div>
@@ -133,7 +152,7 @@ export default function OrgPage() {
                   <td className="secondary">{m.email}</td>
                   <td>
                     {canEdit ? (
-                      <select value={m.role} onChange={(e) => run(() => api.changeRole(m.id, e.target.value as Role))}
+                      <select value={m.role} onChange={(e) => changeRole(m.id, m.name, e.target.value as Role)}
                               aria-label={`Rôle de ${m.name}`}>
                         {org.role === "owner" && <option value="owner">Propriétaire</option>}
                         <option value="admin">Administrateur</option>
@@ -145,7 +164,7 @@ export default function OrgPage() {
                   </td>
                   <td className="secondary small">{formatDate(m.joined_at)}</td>
                   <td style={{ textAlign: "right" }}>
-                    {canEdit && <button className="btn btn-ghost small" onClick={() => run(() => api.removeMember(m.id))}>Retirer</button>}
+                    {canEdit && <button className="btn btn-ghost small" onClick={() => remove(m.id, m.name)}>Retirer</button>}
                     {isSelf && org.role !== "owner" && <button className="btn btn-ghost small" onClick={leave}>Quitter</button>}
                   </td>
                 </tr>

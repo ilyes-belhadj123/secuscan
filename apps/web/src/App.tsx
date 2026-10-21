@@ -42,9 +42,13 @@ function OrgSwitcher() {
       aria-label="Organisation"
       style={{ width: "auto", padding: "4px 8px" }}
       onChange={async (e) => {
-        await api.switchOrg(e.target.value);
-        await refresh();
-        navigate("/");
+        try {
+          await api.switchOrg(e.target.value);
+          await refresh();
+          navigate("/");
+        } catch (err) {
+          window.alert(`Changement d'organisation impossible : ${(err as Error).message}`);
+        }
       }}
     >
       {me.organizations.map((o) => <option key={o.org_id} value={o.org_id}>{o.name}</option>)}
@@ -62,13 +66,13 @@ function Topbar({ health }: { health: Health | null }) {
       <span className="spacer" />
       {me && (
         <>
-          <Link to="/formation" className="small" style={{ fontWeight: 600 }}>Formation</Link>
-          <Link to="/couts" className="small" style={{ fontWeight: 600 }}>Coûts IA</Link>
-          {isAdmin(me) && <Link to="/audit" className="small" style={{ fontWeight: 600 }}>Journal d'audit</Link>}
-          <Link to="/organisation" className="small" style={{ fontWeight: 600 }}>Équipe</Link>
-          <Link to="/offre" className="small" style={{ fontWeight: 600 }}>Offre {me.org.plan_name}</Link>
-          {me.is_operator && <Link to="/operateur" className="small" style={{ fontWeight: 600 }}>Bêta</Link>}
-          {me.can_manage_settings && <Link to="/parametres" className="small" style={{ fontWeight: 600 }}>Paramètres</Link>}
+          <Link to="/formation" className="small nav-link">Formation</Link>
+          <Link to="/couts" className="small nav-link">Coûts IA</Link>
+          {isAdmin(me) && <Link to="/audit" className="small nav-link">Journal d'audit</Link>}
+          <Link to="/organisation" className="small nav-link">Équipe</Link>
+          <Link to="/offre" className="small nav-link">Offre {me.org.plan_name}</Link>
+          {me.is_operator && <Link to="/operateur" className="small nav-link">Bêta</Link>}
+          {me.can_manage_settings && <Link to="/parametres" className="small nav-link">Paramètres</Link>}
         </>
       )}
       {health && (

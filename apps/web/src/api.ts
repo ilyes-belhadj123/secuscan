@@ -327,8 +327,16 @@ export function setUnauthorizedHandler(handler: () => void) {
   onUnauthorized = handler;
 }
 
+/** Serveur injoignable (coupure réseau, serveur redémarré) : distinct d'une erreur renvoyée par l'API. */
+export const NETWORK_ERROR = 0;
+
 async function request<T>(url: string, init?: RequestInit): Promise<T> {
-  const resp = await fetch(url, { credentials: "same-origin", ...init });
+  let resp: Response;
+  try {
+    resp = await fetch(url, { credentials: "same-origin", ...init });
+  } catch {
+    throw new ApiError("Serveur injoignable : vérifiez votre connexion, puis réessayez.", NETWORK_ERROR);
+  }
   if (resp.status === 401 && !url.startsWith("/api/auth/")) onUnauthorized();
   if (!resp.ok) {
     let detail = `Erreur ${resp.status}`;
@@ -350,11 +358,40 @@ const send = (method: string, body?: unknown): RequestInit => ({
   body: body === undefined ? undefined : JSON.stringify(body),
 });
 
-const json = (body: unknown): RequestInit => ({
-  method: "POST",
-  headers: { "Content-Type": "application/json" },
-  body: JSON.stringify(body),
-});
+/** Télécharge un fichier produit par l'API (rapport) : une erreur s'affiche au lieu d'être enregistrée
+ *  dans un fichier « report.pdf » illisible. */
+export async function downloadFile(url: string, fallbackName: string): Promise<void> {
+  let resp: Response;
+  try {
+    resp = await fetch(url, { credentials: "same-origin" });
+  } catch {
+    throw new ApiError("Serveur injoignable : vérifiez votre connexion, puis réessayez.", NETWORK_ERROR);
+  }
+  if (!resp.ok) {
+    let detail = `Erreur ${resp.status}`;
+    try {
+      const body = await resp.json();
+      if (typeof body.detail === "string") detail = body.detail;
+    } catch {
+      /* réponse non JSON */
+    }
+    throw new ApiError(detail, resp.status);
+  }
+  const name = /filename="?([^";]+)"?/.exec(resp.headers.get("content-disposition") ?? "")?.[1] ?? fallbackName;
+  const link = document.createElement("a");
+  link.href = URL.createObjectURL(await resp.blob());
+  link.download = name;
+  document.body.appendChild(link);
+  link.click();
+  link.remove();
+  window.setTimeout(() => URL.revokeObjectURL(link.href), 10_000);
+}
+
+/** Adresse d'un dépôt analysé, sans le « @branche » ajouté par l'API. */
+export function splitSourceUrl(sourceUrl: string): { url: string; branch: string | null } {
+  const m = /^(.+?\/\/[^@\s]+?)(?:@([^@\s]+))?$/.exec(sourceUrl);
+  return m ? { url: m[1], branch: m[2] ?? null } : { url: sourceUrl, branch: null };
+}
 
 export const api = {
   health: () => request<Health>("/api/health"),
@@ -397,9 +434,9 @@ export const api = {
     return request<Scan>("/api/scans/upload", { method: "POST", body: form });
   },
   git: (url: string, branch: string, projectName: string) =>
-    request<Scan>("/api/scans/git", json({ url, branch: branch || null, project_name: projectName || null })),
+    request<Scan>("/api/scans/git", send("POST", { url, branch: branch || null, project_name: projectName || null })),
   gitRepoScan: (provider: string, repo: string, branch: string) =>
-    request<Scan>("/api/scans/git", json({ provider, repo, branch: branch || null })),
+    request<Scan>("/api/scans/git", send("POST", { provider, repo, branch: branch || null })),
   gitProviders: () => request<GitProvider[]>("/api/git/providers"),
   gitConnect: (provider: string) => request<{ authorize_url: string }>(`/api/git/${provider}/connect`),
   gitDisconnect: (provider: string) => request(`/api/git/${provider}`, send("DELETE")),
@@ -407,9 +444,9 @@ export const api = {
   gitBranches: (provider: string, repo: string) =>
     request<string[]>(`/api/git/${provider}/branches?repo=${encodeURIComponent(repo)}`),
   snippet: (filename: string, code: string, projectName: string) =>
-    request<Scan>("/api/scans/snippet", json({ filename, code, project_name: projectName })),
+    request<Scan>("/api/scans/snippet", send("POST", { filename, code, project_name: projectName })),
   dismiss: (id: string, reason: string, justification: string) =>
-    request<Finding>(`/api/findings/${id}/dismiss`, json({ reason, justification })),
+    request<Finding>(`/api/findings/${id}/dismiss`, send("POST", { reason, justification })),
   audit: () => request<AuditEntry[]>("/api/audit"),
   billing: () => request<Billing>("/api/billing"),
   fixFeedback: (id: string) => request<{ verdict: FixVerdict; comment: string } | null>(`/api/findings/${id}/feedback`),
@@ -427,7 +464,7 @@ export const api = {
   exercises: () => request<{ exercises: ExerciseSummary[]; passed: number; total: number }>("/api/training/exercises"),
   exercise: (id: string) => request<ExerciseDetail>(`/api/training/exercises/${id}`),
   submitExercise: (id: string, code: string) =>
-    request<SubmissionResult>(`/api/training/exercises/${id}/submit`, json({ code })),
+    request<SubmissionResult>(`/api/training/exercises/${id}/submit`, send("POST", { code })),
   teamTraining: () => request<TeamTraining>("/api/training/progress"),
   aiSettings: () => request<AISettings>("/api/settings/ai"),
   aiModels: () => request<AIModel[]>("/api/settings/ai/models"),

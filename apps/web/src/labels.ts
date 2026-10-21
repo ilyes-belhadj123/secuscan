@@ -65,3 +65,19 @@ export function formatTokens(value: number): string {
 export function formatDate(iso: string): string {
   return new Date(iso).toLocaleString("fr-FR", { dateStyle: "medium", timeStyle: "short" });
 }
+
+/** Motifs pour ignorer une alerte (FindingPage) et leur forme courte (journal d'audit). */
+export const DISMISS_REASONS = [
+  { value: "false_positive", label: "Faux positif" },
+  { value: "accepted_risk", label: "Risque accepté" },
+  { value: "not_applicable", label: "Non applicable (code mort, test…)" },
+];
+export const DISMISS_REASON_LABEL: Record<string, string> = {
+  false_positive: "faux positif",
+  accepted_risk: "risque accepté",
+  not_applicable: "non applicable",
+};
+
+export const ROLE_LABEL: Record<"owner" | "admin" | "member", string> = {
+  owner: "Propriétaire", admin: "Administrateur", member: "Membre",
+};
