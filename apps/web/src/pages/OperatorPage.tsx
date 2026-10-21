@@ -1,5 +1,4 @@
 import { useEffect, useState } from "react";
-import { Link } from "react-router-dom";
 import { api, type OperatorDashboard } from "../api";
 import { KIND_LABEL, formatDate } from "../labels";
 
@@ -33,8 +32,7 @@ export default function OperatorPage() {
   return (
     <main className="container stack">
       <div>
-        <Link to="/" className="small">← Accueil</Link>
-        <h1 style={{ marginTop: 4 }}>Bêta — équipes pilotes</h1>
+        <h1>Bêta — équipes pilotes</h1>
         <p className="secondary" style={{ margin: "4px 0 0" }}>
           Indicateurs agrégés de toutes les organisations (aucun code ni contenu d'alerte). Objectifs issus du cahier des charges.
         </p>

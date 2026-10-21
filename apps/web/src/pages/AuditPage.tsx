@@ -76,8 +76,7 @@ export default function AuditPage() {
   return (
     <main className="container stack">
       <div>
-        <Link to="/" className="small">← Accueil</Link>
-        <h1 style={{ marginTop: 4 }}>Journal d'audit</h1>
+        <h1>Journal d'audit</h1>
         <p className="secondary" style={{ margin: "4px 0 0" }}>
           Traçabilité des analyses, alertes ignorées et exports de rapports. Journal en ajout seul : aucune entrée ne
           peut être modifiée ni supprimée depuis l'application.

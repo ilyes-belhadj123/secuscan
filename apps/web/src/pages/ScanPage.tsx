@@ -7,6 +7,7 @@ import {
 import { SeverityBadge, VerdictBadge } from "../components/Badges";
 import { OwaspChart, ScoreHistoryChart, SeverityChart } from "../components/Charts";
 import Modal from "../components/Modal";
+import { PageHeader } from "../components/PageHeader";
 import { useSession } from "../session";
 import {
   KIND_LABEL, LANGUAGE_LABEL, SEVERITIES, SEVERITY_LABEL, formatDate, formatTokens, formatUsd, grade,
@@ -27,35 +28,77 @@ function Progress({ scan, reconnecting }: { scan: Scan; reconnecting: boolean })
   const current = STEPS.findIndex((s) => scan.stage.startsWith(s));
   const queued = scan.status === "queued";
   return (
-    <div className="card stack" style={{ maxWidth: 640, margin: "40px auto" }}>
-      <div>
-        <h2>{queued ? `Analyse de « ${scan.project_name} » en file d'attente` : `Analyse de « ${scan.project_name} » en cours`}</h2>
-        <p className="secondary" style={{ margin: "4px 0 0" }}>
-          {queued
-            ? "Démarrage imminent : l'analyse commence dès qu'un moteur d'analyse se libère."
-            : "Le code est analysé sans jamais être exécuté, puis supprimé à la fin de l'analyse."}
-        </p>
-      </div>
+    <div className="stack">
+      <PageHeader
+        back={<Link to="/" className="small">← Tableau de bord</Link>}
+        title={scan.project_name}
+        subtitle={queued
+          ? "En file d'attente : l'analyse commence dès qu'un moteur d'analyse se libère."
+          : "Analyse en cours · le code est lu sans jamais être exécuté, puis supprimé à la fin de l'analyse."}
+      />
       {reconnecting && (
         <div className="warning-box" role="status">Connexion perdue, nouvelle tentative… L'analyse continue sur le serveur.</div>
       )}
-      <div className="progress-track" role="progressbar" aria-valuenow={Math.round(scan.progress * 100)}>
-        <div className="progress-fill" style={{ width: `${Math.max(3, scan.progress * 100)}%` }} />
-      </div>
-      <ol className="steps">
-        {STEPS.map((step, i) => {
-          const state = current === -1 ? "" : i < current ? "done" : i === current ? "current" : "";
-          return (
-            <li key={step} className={state}>
-              <span className="step-icon">
-                {state === "done" ? "✓" : state === "current" ? <span className="spinner" /> : "·"}
-              </span>
-              {state === "current" ? scan.stage : step}
-            </li>
-          );
-        })}
-      </ol>
+      <section className="card stack" style={{ gap: 16 }}>
+        <div className="card-title" style={{ marginBottom: 0 }}>
+          <h2>Chaîne d'analyse</h2>
+          <span className="muted small">{Math.round(scan.progress * 100)} %</span>
+        </div>
+        <div className="progress-track" role="progressbar" aria-valuenow={Math.round(scan.progress * 100)}>
+          <div className="progress-fill" style={{ width: `${Math.max(3, scan.progress * 100)}%` }} />
+        </div>
+        <div className="pipeline">
+          {STEPS.map((step, i) => {
+            const state = current === -1 ? "" : i < current ? "done" : i === current ? "current" : "";
+            return (
+              <div key={step} className={`pipeline-step ${state}`}>
+                <div className="step-head">
+                  {state === "done" ? <span className="check" aria-hidden>✓</span>
+                    : state === "current" ? <span className="spinner" aria-hidden />
+                      : <span className="check pending" aria-hidden>{i + 1}</span>}
+                  {step}
+                </div>
+                <div className="step-detail">
+                  {state === "done" ? "Terminé" : state === "current" ? scan.stage : "En attente"}
+                </div>
+              </div>
+            );
+          })}
+        </div>
+      </section>
     </div>
+  );
+}
+
+/** Chaîne d'une analyse terminée : chaque étape et ce qu'elle a produit. */
+function Pipeline({ scan }: { scan: Scan }) {
+  const s = scan.summary;
+  const withAi = s.ai_calls > 0 || s.ai_cache_hits > 0;
+  const steps: { title: string; detail: string; warn?: boolean }[] = [
+    { title: "Lecture du code", detail: `${s.files_scanned} fichiers, ${s.lines_scanned.toLocaleString("fr-FR")} lignes` },
+    { title: "Secrets", detail: `${s.by_kind.secret ?? 0} secret(s) exposé(s)` },
+    { title: "Règles statiques", detail: `${s.by_kind.sast ?? 0} faille(s) dans le code` },
+    { title: "Dépendances", detail: `${s.by_kind.dependency ?? 0} dépendance(s) vulnérable(s)` },
+    withAi
+      ? { title: "Revue IA", detail: `${s.by_kind.ai ?? 0} faille(s) logique(s) · ${s.false_positives} faux positif(s) écarté(s)` }
+      : { title: "Revue IA", detail: "IA non disponible : règles seules", warn: true },
+    { title: "Score", detail: `${scan.score ?? 0}/100 · note ${grade(scan.score ?? 0)}` },
+  ];
+  return (
+    <section className="card stack" style={{ gap: 16 }}>
+      <h2>Chaîne d'analyse</h2>
+      <div className="pipeline">
+        {steps.map((step) => (
+          <div key={step.title} className={`pipeline-step ${step.warn ? "warn" : "done"}`}>
+            <div className="step-head">
+              <span className={`check ${step.warn ? "warn" : ""}`} aria-hidden>{step.warn ? "!" : "✓"}</span>
+              {step.title}
+            </div>
+            <div className="step-detail">{step.detail}</div>
+          </div>
+        ))}
+      </div>
+    </section>
   );
 }
 
@@ -191,41 +234,43 @@ export default function ScanPage() {
 
   return (
     <main className="container stack">
-      <div className="row" style={{ justifyContent: "space-between" }}>
-        <div>
-          <Link to="/" className="small">← Toutes les analyses</Link>
-          <h1 style={{ marginTop: 4 }}>{scan.project_name}</h1>
-          {source && (
-            <div className="small">
-              <a className="mono" href={source.url} target="_blank" rel="noreferrer">{source.url}</a>
-              {source.branch && <span className="secondary"> · branche <span className="mono">{source.branch}</span></span>}
+      <PageHeader
+        back={<Link to="/" className="small">← Tableau de bord</Link>}
+        title={scan.project_name}
+        subtitle={
+          <>
+            {source && (
+              <div>
+                <a className="mono" href={source.url} target="_blank" rel="noreferrer">{source.url}</a>
+                {source.branch && <> · branche <span className="mono">{source.branch}</span></>}
+              </div>
+            )}
+            <div>
+              Analysé le {formatDate(scan.completed_at ?? scan.created_at)} · {s.files_scanned} fichiers ·{" "}
+              {s.lines_scanned.toLocaleString("fr-FR")} lignes · {s.duration_seconds} s ·{" "}
+              {Object.entries(s.languages).map(([k, v]) => `${LANGUAGE_LABEL[k] ?? k} (${v})`).join(", ")}
             </div>
-          )}
-          <div className="secondary small">
-            Analysé le {formatDate(scan.completed_at ?? scan.created_at)} · {s.files_scanned} fichiers ·{" "}
-            {s.lines_scanned.toLocaleString("fr-FR")} lignes · {s.duration_seconds} s ·{" "}
-            {Object.entries(s.languages).map(([k, v]) => `${LANGUAGE_LABEL[k] ?? k} (${v})`).join(", ")}
-          </div>
-          {(s.ai_calls > 0 || s.ai_cache_hits > 0) && (
-            <div className="secondary small">
-              IA : {s.ai_calls} appel(s){s.ai_budget_calls ? ` sur ${s.ai_budget_calls} autorisés` : ""} ·{" "}
-              {s.ai_cache_hits} réponse(s) en cache · {formatTokens(s.ai_tokens)} jetons · coût estimé{" "}
-              <strong>{formatUsd(s.ai_cost_usd ?? 0)}</strong> · <Link to="/couts">détail des coûts</Link>
-            </div>
-          )}
-        </div>
-        <div className="stack" style={{ gap: 6, alignItems: "flex-end" }}>
-          <div className="row">
-            <button className="btn" onClick={downloadJson} disabled={jsonState === "busy"}>
-              {jsonState === "busy" ? <span className="spinner" /> : "⤓"} JSON
+            {(s.ai_calls > 0 || s.ai_cache_hits > 0) && (
+              <div>
+                IA : {s.ai_calls} appel(s){s.ai_budget_calls ? ` sur ${s.ai_budget_calls} autorisés` : ""} ·{" "}
+                {s.ai_cache_hits} en cache · {formatTokens(s.ai_tokens)} jetons · coût estimé{" "}
+                <strong>{formatUsd(s.ai_cost_usd ?? 0)}</strong> · <Link to="/couts">détail des coûts</Link>
+              </div>
+            )}
+          </>
+        }
+        actions={
+          <>
+            <button className="btn btn-outline" onClick={downloadJson} disabled={jsonState === "busy"}>
+              {jsonState === "busy" ? <span className="spinner" /> : null} Exporter en JSON
             </button>
-            <button className="btn btn-primary" onClick={() => setShowExport(true)}>
-              ⤓ Rapport PDF
-            </button>
-          </div>
-          {jsonState !== "idle" && jsonState !== "busy" && <span className="error small">{jsonState}</span>}
-        </div>
-      </div>
+            <button className="btn btn-primary" onClick={() => setShowExport(true)}>Rapport PDF</button>
+            {jsonState !== "idle" && jsonState !== "busy" && <span className="error small">{jsonState}</span>}
+          </>
+        }
+      />
+
+      <Pipeline scan={scan} />
 
       {(s.warnings ?? []).length > 0 && (
         <div className="warning-box" role="status">

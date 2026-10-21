@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useState } from "react";
-import { Link, useSearchParams } from "react-router-dom";
+import { useSearchParams } from "react-router-dom";
 import { api, type Billing, type PlanId, type PlanOffer } from "../api";
 import { formatDate } from "../labels";
 import { useSession } from "../session";
@@ -136,8 +136,7 @@ export default function PlanPage() {
   return (
     <main className="container stack">
       <div>
-        <Link to="/" className="small">← Accueil</Link>
-        <h1 style={{ marginTop: 4 }}>Offre et facturation</h1>
+        <h1>Offre et facturation</h1>
         <p className="secondary" style={{ margin: "4px 0 0" }}>
           Offre actuelle : <strong>{billing.plan_name}</strong>
           {billing.monthly_estimate_eur > 0 && <> · estimation mensuelle {eur(billing.monthly_estimate_eur)} HT</>}.

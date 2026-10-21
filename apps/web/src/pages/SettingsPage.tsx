@@ -1,5 +1,4 @@
 import { useEffect, useMemo, useState, type FormEvent } from "react";
-import { Link } from "react-router-dom";
 import { api, type AIModel, type AISettings } from "../api";
 
 const CUSTOM = "__custom__";
@@ -68,8 +67,7 @@ export default function SettingsPage({ onSaved }: { onSaved: () => void }) {
   return (
     <main className="container stack" style={{ maxWidth: 720 }}>
       <div>
-        <Link to="/" className="small">← Accueil</Link>
-        <h1 style={{ marginTop: 4 }}>Paramètres</h1>
+        <h1>Paramètres</h1>
         <p className="secondary" style={{ margin: "4px 0 0" }}>
           Réglages de l'installation, communs à toutes les organisations.
         </p>

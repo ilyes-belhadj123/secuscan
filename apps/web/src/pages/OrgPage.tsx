@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useState, type FormEvent } from "react";
-import { Link, useNavigate } from "react-router-dom";
+import { useNavigate } from "react-router-dom";
 import { api, type OrgDetails, type Role } from "../api";
 import LogoCard from "../components/LogoCard";
 import { ROLE_LABEL, formatDate } from "../labels";
@@ -77,8 +77,7 @@ export default function OrgPage() {
   return (
     <main className="container stack">
       <div>
-        <Link to="/" className="small">← Accueil</Link>
-        <h1 style={{ marginTop: 4 }}>{org.name}</h1>
+        <h1>{org.name}</h1>
         <p className="secondary" style={{ margin: "4px 0 0" }}>
           Votre rôle : <strong>{ROLE_LABEL[org.role]}</strong>. Les analyses, alertes ignorées et rapports sont partagés entre
           les membres de l'organisation, et invisibles des autres organisations.

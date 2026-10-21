@@ -21,8 +21,7 @@ export default function CostsPage() {
   return (
     <main className="container stack">
       <div>
-        <Link to="/" className="small">← Accueil</Link>
-        <h1 style={{ marginTop: 4 }}>Coûts IA</h1>
+        <h1>Coûts IA</h1>
         <p className="secondary" style={{ margin: "4px 0 0" }}>
           Offre <strong>{costs.plan}</strong> : jusqu'à {costs.budget_calls} appels et {formatTokens(costs.budget_tokens)} jetons
           par analyse. Au-delà, les alertes les moins graves gardent l'explication générique de leur règle. Estimation au

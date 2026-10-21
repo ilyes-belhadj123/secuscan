@@ -2,7 +2,9 @@ import { useEffect, useRef, useState, type DragEvent } from "react";
 import { Link, useNavigate, useSearchParams } from "react-router-dom";
 import { ApiError, api, type Health, type Scan } from "../api";
 import GitRepoPicker from "../components/GitRepoPicker";
+import { PageHeader } from "../components/PageHeader";
 import SurveyCard from "../components/SurveyCard";
+import { useSession } from "../session";
 import { formatDate, grade } from "../labels";
 
 // Exemple volontairement vulnérable, prérempli dans « Coller du code »
@@ -32,6 +34,7 @@ const RECENT = 12;
 
 export default function HomePage({ health }: { health: Health | null }) {
   const navigate = useNavigate();
+  const { me } = useSession();
   const [scans, setScans] = useState<Scan[] | null>(null);
   const [scansError, setScansError] = useState<string | null>(null);
   const [showAll, setShowAll] = useState(false);
@@ -106,13 +109,19 @@ export default function HomePage({ health }: { health: Health | null }) {
 
   return (
     <main className="container stack">
-      <section className="hero">
-        <h1>Trouvez, comprenez et corrigez les failles de votre code</h1>
-        <p>
-          SecuScan combine règles statiques, détection de secrets et analyse des dépendances, puis l'IA
-          écarte les faux positifs, explique chaque faille en français et propose un correctif prêt à appliquer.
-        </p>
-      </section>
+      <PageHeader
+        title="Tableau de bord"
+        subtitle={<>
+          {me?.org.name} · offre {me?.org.plan_name}
+          {scans ? ` · ${scans.length} analyse(s)` : ""} · règles statiques, secrets, dépendances et revue par l'IA
+        </>}
+        actions={
+          <button className="btn btn-primary" disabled={!!busy || health?.demo_available === false}
+                  onClick={() => launch("demo", api.startDemo)}>
+            {busy === "demo" ? <span className="spinner" /> : null} Analyser la démo Acme Shop
+          </button>
+        }
+      />
 
       <SurveyCard />
       {gitNotice && (
@@ -284,8 +293,9 @@ export default function HomePage({ health }: { health: Health | null }) {
                   </td>
                   <td className="secondary">{formatDate(s.created_at)}</td>
                   <td>
-                    {s.status === "completed" ? "Terminée" : s.status === "failed" ? "Échec"
-                      : s.status === "queued" ? "En attente…" : "En cours…"}
+                    {s.status === "completed" ? <span className="pill ok">Terminée</span>
+                      : s.status === "failed" ? <span className="pill ko">Échec</span>
+                        : <span className="pill wait">{s.status === "queued" ? "En attente" : "En cours"}</span>}
                   </td>
                   <td style={{ textAlign: "right" }}>{s.status === "completed" ? s.summary.total : "—"}</td>
                   <td style={{ textAlign: "right", fontWeight: 650 }}>

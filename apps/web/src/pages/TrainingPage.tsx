@@ -51,8 +51,7 @@ export default function TrainingPage() {
   return (
     <main className="container stack">
       <div>
-        <Link to="/" className="small">← Accueil</Link>
-        <h1 style={{ marginTop: 4 }}>Formation au code sécurisé</h1>
+        <h1>Formation au code sécurisé</h1>
         <p className="secondary" style={{ margin: "4px 0 0" }}>
           Corrigez des failles réelles dans un code vulnérable. Votre correction est vérifiée par les règles de
           SecuScan (elle n'est jamais exécutée), puis commentée par l'IA.
