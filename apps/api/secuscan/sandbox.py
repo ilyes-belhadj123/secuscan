@@ -108,7 +108,7 @@ def _secrets(scan_id: str, codebase) -> tuple[list[Finding], dict[str, SourceFil
     # Les manifests peuvent aussi contenir des jetons (ex. registres privés)
     manifests = [SourceFile(m.path, MANIFEST_FILES[m.name], m.content) for m in codebase.manifests]
     for source in codebase.files + manifests + codebase.configs:
-        matches = secrets.find_secrets(source)
+        matches = _secrets_worth_reporting(source, secrets.find_secrets(source))
         if source.language == CONFIG_LANGUAGE:  # « cle=valeur » sans guillemets
             matches += config_secrets.find_config_secrets(source, matches)
         clean = secrets.redact(source, matches)
@@ -148,12 +148,30 @@ def _external_engines(settings: Settings, root: Path, code_files: dict) -> list:
     return results
 
 
+# Une alerte de flux entre fonctions est la même faille qu'une alerte de règle, de même CWE, située
+# jusqu'à ce nombre de lignes au-dessus d'elle dans le même fichier (construction puis exécution)
+SAME_FLAW_LINES = 30
+# Clé privée réelle : l'en-tête est suivi d'un contenu encodé (pas seulement manipulé dans du code)
+_KEY_BODY = re.compile(r"[A-Za-z0-9+/]{40,}")
+
+
+def _secrets_worth_reporting(source: SourceFile, matches: list) -> list:
+    """Écarte les en-têtes « -----BEGIN PRIVATE KEY----- » écrits dans du code qui lit ou produit une clé
+    (« .replace("-----BEGIN…", "") ») : sans contenu encodé à la suite, ce n'est pas une clé."""
+    lines = source.content.split("\n")
+    return [m for m in matches if m.pattern.id != "SECRET-PRIVKEY"
+            or _KEY_BODY.search("\n".join(lines[m.line - 1:m.line + 3]))]
+
+
 def _sast(scan_id: str, settings: Settings, redacted: dict, root: Path, existing: list[Finding]) -> list[Finding]:
     code_files = {p: s for p, s in redacted.items() if not manifest_kind(p.split("/")[-1])}
     raws = [raw for source in code_files.values() for raw in sast.analyze_file(source)]
     # Flux d'un fichier à l'autre : alerte sur l'opération dangereuse, qui cite l'appelant
     for flow in interproc.cross_file_flows(list(code_files.values())):
         rule = RULES_BY_ID[flow.sink.rule_id]
+        if any(r.file == flow.sink.file and r.cwe == rule.cwe and flow.sink.line - SAME_FLAW_LINES <= r.start_line
+               <= flow.sink.line for r in raws):
+            continue
         raws.append(sast.RawFinding(
             kind="sast", rule_id=rule.id, title=rule.title, message=interproc.describe(flow), cwe=rule.cwe,
             severity=rule.severity, file=flow.sink.file, language=code_files[flow.sink.file].language,

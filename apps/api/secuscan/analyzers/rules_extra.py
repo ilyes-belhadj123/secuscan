@@ -34,6 +34,26 @@ EXTRA_RULES: list[Rule] = [
         "Utiliser jwt.verify avec une liste d'algorithmes explicite sans « none » : { algorithms: [\"HS256\"] }.",
     ),
     Rule(
+        # jjwt : parse() accepte un jeton non signé (« alg: none ») ; parseClaimsJws / parseSignedClaims l'exigent
+        "JAVA-JWT-PARSE", ("java",),
+        _r(r"\bJwts\.parser(Builder)?\(\)[^;]*\.parse\("),
+        "Jeton JWT accepté sans vérification", "CWE-347", C,
+        "parse() de jjwt accepte aussi un jeton non signé : il suffit de retirer la signature et de déclarer "
+        "l'algorithme « none » pour se faire passer pour n'importe quel utilisateur.",
+        "Utiliser parseClaimsJws() (ou parseSignedClaims() en jjwt 0.12), qui refuse tout jeton non signé.",
+    ),
+    Rule(
+        # Extraction d'archive : le nom d'une entrée (« ../../etc/cron.d/x ») sort du dossier de destination
+        "JAVA-ZIPSLIP", ("java",),
+        _r(r"new\s+File\([^;]*\.getName\(\)\s*\)|\.resolve\(\s*\w+\.getName\(\)\s*\)"),
+        "Extraction d'archive hors du dossier prévu (Zip Slip)", "CWE-22", H,
+        "Le chemin d'une entrée d'archive est utilisé tel quel : une entrée « ../../… » écrit n'importe où.",
+        "Normaliser le chemin obtenu et vérifier qu'il reste dans le dossier : "
+        "dest.toPath().resolve(name).normalize().startsWith(dest.toPath()).",
+        file_requires=_r(r"\bZip(Entry|InputStream|File)\b|\bJarEntry\b|\bTarArchiveEntry\b"),
+        file_excludes=_r(r"\.normalize\(\)[^;]*\.startsWith\(|getCanonicalPath\(\)[^;]*\.startsWith\("),
+    ),
+    Rule(
         "PY-APP-SECRET", ("python",),
         _r(r"\b(secret_key|SECRET_KEY|JWT_SECRET(_KEY)?)\b\s*=\s*[\"'][^\"']{0,64}[\"']"),
         "Secret d'application écrit en dur", "CWE-798", H,

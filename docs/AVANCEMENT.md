@@ -1,6 +1,6 @@
 # Avancement — SecuScan
 
-Dernière mise à jour : 23/09/2026 · Objectif en cours : **démo client** (avant le 30/09/2026)
+Dernière mise à jour : 21/10/2026 · Objectif en cours : **démo client**
 
 Légende : ✅ fait · 🟡 partiel (voir « reste à faire ») · ⬜ à faire · 🔒 bloqué
 
@@ -14,13 +14,14 @@ Légende : ✅ fait · 🟡 partiel (voir « reste à faire ») · ⬜ à faire 
 
 ## Qualité de détection (benchmark SS-8)
 
-Mesure du 23/09/2026 sur 83 failles annotées (4 langages) — rapport complet :
+Mesure du 21/10/2026 sur 161 failles annotées (6 langages + infrastructure) — rapport complet :
 [benchmark/results/latest-rules.md](../benchmark/results/latest-rules.md)
 
 | Mode | Taux de détection | Taux de faux positifs | Objectif cahier des charges |
 |---|---|---|---|
-| Règles seules (6 langages + infrastructure + flux entre fichiers, 161 failles) | **99 %** (159/161) | **2 %** (4) | > 85 % / < 15 % |
-| Règles + IA (Claude, réel, 6 langages + infrastructure, 151 failles) | **100 %** (151/151) | **6 %** (10) | > 85 % / < 15 % |
+| Benchmark externe, règles seules (DVWA, NodeGoat, WebGoat, 89 failles) | **90 %** (80/89) | **8 %** (7) | > 85 % / < 15 % |
+| Règles seules (6 langages + infrastructure + flux entre fichiers, 161 failles) | **99 %** (159/161) | **2 %** (3) | > 85 % / < 15 % |
+| Règles + IA (Claude, réel, 6 langages + infrastructure, 151 failles — mesure du 20/10, à refaire) | **100 %** (151/151) | **6 %** (10) | > 85 % / < 15 % |
 | Correctifs syntaxiquement valides | **100 %** (139/139 vérifiables, dont 1 réparé par relance) | | > 80 % |
 
 Rapport IA : [benchmark/results/latest-ai.md](../benchmark/results/latest-ai.md). L'IA trouve les 2 failles
@@ -29,8 +30,10 @@ constante. Sur les 6 faux positifs restants, 5 sont des failles logiques signal�
 fichiers « sûrs » et la plupart sont défendables (ex. route sans contrôle d'accès) ; le 6e est un MD5
 utilisé comme somme de contrôle (cas discutable).
 Coût mesuré : analyse complète d'Acme Shop ≈ 85 000 jetons, 85 s.
-⚠️ Le corpus a été écrit par l'équipe qui écrit les règles : ces chiffres sont optimistes. Prochaine
-étape : ajouter des applications vulnérables open source externes (NodeGoat, DVWA, WebGoat) annotées.
+⚠️ Le corpus a été écrit par l'équipe qui écrit les règles : ces chiffres sont optimistes. D'où le
+**benchmark externe** ([docs/benchmark-externe.md](benchmark-externe.md)) sur trois projets publics
+vulnérables jamais vus pendant l'écriture des règles (DVWA, NodeGoat, WebGoat, 89 failles annotées) :
+règles seules **90 % de détection, 8 % de faux positifs** (première mesure : 74 % / 27 %).
 
 Réalisé en plus des tickets : **revue logique par l'IA** (couche 4 du cahier des charges : failles
 qu'aucune règle ne détecte, ex. IDOR), **commande de préparation de la démo**, projet de démonstration

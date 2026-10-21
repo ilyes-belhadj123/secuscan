@@ -307,7 +307,8 @@ RULES: list[Rule] = [
     ),
     Rule(
         "JAVA-DESER", ("java",),
-        _r(r"new\s+ObjectInputStream\("),
+        # (XStream sans liste blanche de types : même exécution de code que la sérialisation Java)
+        _r(r"new\s+ObjectInputStream\(|\b\w*[xX][sS]tream\.fromXML\("),
         "Désérialisation non sécurisée", "CWE-502", C,
         "La désérialisation Java native de données non fiables permet l'exécution de code.",
         "Utiliser JSON avec un schéma, ou un ObjectInputFilter en liste blanche.",

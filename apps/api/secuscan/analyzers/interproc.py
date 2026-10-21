@@ -99,7 +99,7 @@ def _body(lines: list[str], start: int, indent: str, language: str) -> tuple[int
 def extract_functions(source: SourceFile) -> list[Function]:
     lines = source.content.split("\n")
     out = []
-    for _start, end, line in logical_lines(lines):  # signature sur plusieurs lignes : « def f(\n a,\n): »
+    for _start, end, line in logical_lines(lines, source.language):  # signature sur plusieurs lignes : « def f(\n a,\n): »
         if len(line) > MAX_LINE_LENGTH:
             continue
         for pattern in _DEFS.get(source.language, ()):

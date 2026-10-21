@@ -436,3 +436,48 @@ def test_csharp_content_is_xss_only_as_html():
 }
 """
     assert flows(code, "csharp") == [(6, "CS-XSS-FLOW")]
+
+
+def test_sql_escaping_protects_only_quoted_values():
+    base = "$id = mysqli_real_escape_string($conn, $_POST['id']);\n"
+    unquoted = base + "$q = \"SELECT * FROM users WHERE id = $id;\";\nmysqli_query($conn, $q);\n"
+    quoted = base + "$q = \"SELECT * FROM users WHERE id = '$id';\";\nmysqli_query($conn, $q);\n"
+    assert flows(unquoted, "php") == [(3, "PHP-SQLI-FLOW")]
+    assert flows(quoted, "php") == []
+    # Toujours non fiable pour la page HTML
+    assert flows(base + "echo $id;\n", "php") == [(2, "PHP-XSS-FLOW")]
+
+
+def java_rules(code: str) -> list[str]:
+    return sorted({f.rule_id for f in sast.analyze_file(SourceFile("A.java", "java", code))})
+
+
+def test_java_jwt_xstream_and_zip_slip():
+    assert java_rules("Jwt jwt = Jwts.parser().setSigningKey(KEY).parse(token);\n") == ["JAVA-JWT-PARSE"]
+    assert java_rules("Jws<Claims> c = Jwts.parser().setSigningKey(KEY).parseClaimsJws(token);\n") == []
+    assert java_rules("contact = (Contact) xstream.fromXML(payload);\n") == ["JAVA-DESER"]
+    zip_code = ("import java.util.zip.ZipEntry;\nclass A {\n  void x(ZipEntry e) {\n"
+                "    File f = new File(dir, e.getName());\n  }\n}\n")
+    assert "JAVA-ZIPSLIP" in java_rules(zip_code)
+    guard = "    if (!f.toPath().normalize().startsWith(dir.toPath())) throw new IOException();\n"
+    checked = zip_code.replace("    File f", guard + "    File f")
+    assert "JAVA-ZIPSLIP" not in java_rules(checked)
+
+
+def test_spring_params_without_annotation_and_split_concatenation():
+    code = """public class Lesson {
+  @PostMapping("/attack")
+  @ResponseBody
+  public AttackResult completed(String name, Integer page) {
+    String query =
+        "SELECT * FROM employees WHERE last_name = '"
+            + name
+            + "'";
+    ResultSet results = statement.executeQuery(query);
+    return null;
+  }
+}
+"""
+    assert flows(code, "java") == [(9, "JAVA-SQLI-FLOW")]
+    # Sans annotation de routage, un paramètre texte n'est pas une entrée utilisateur
+    assert flows(code.replace('  @PostMapping("/attack")\n', ""), "java") == []

@@ -158,14 +158,15 @@ SINKS: dict[str, list[Sink]] = {
         Sink("PHP-XSS-FLOW", "xss", _r(r"^\s*(echo|print)\b|<\?=|\bprintf\("), first_arg=False),
         # Balise concaténée (« '<pre>' . $x », « $x . '</pre>' ») ou interpolée (« "<pre>{$x}" ») ;
         # pas une balise passée en argument (« str_replace('<script>', '', $x) »)
-        Sink("PHP-XSS-FLOW", "xss", _r(r"^\s*\$\w+\s*\.?=(?![=>])(?=[^;]*("
+        Sink("PHP-XSS-FLOW", "xss", _r(r"^\s*\$\w+\s*\.?=(?![=>])(?=\s*(?:[\"']|\$\w+(?:\[[^\]]*\])?\s*\.))(?=[^;]*("
                                       r"[\"'][^\"']*</?[a-zA-Z][\w-]*[\s>/][^\"']*[\"']\s*\."
                                       r"|\.\s*[\"'][^\"']*</?[a-zA-Z][\w-]*[\s>/]"
                                       r"|\"[^\"]*</?[a-zA-Z][\w-]*[\s>/][^\"]*\$))"), first_arg=False),
     ],
     "java": [
-        Sink("JAVA-SQLI-FLOW", "sql", _r(r"\.(executeQuery|executeUpdate|execute|addBatch|prepareStatement|"
-                                         r"createQuery|createNativeQuery)\(")),
+        # (« super.execute(…) » : méthode de la classe parente, pas une requête)
+        Sink("JAVA-SQLI-FLOW", "sql", _r(r"(?<!super)(?<!this)\.(executeQuery|executeUpdate|execute|addBatch|"
+                                         r"prepareStatement|createQuery|createNativeQuery)\(")),
         Sink("JAVA-CMDI-FLOW", "cmd", _r(r"\.exec\(|new\s+ProcessBuilder\(")),
         Sink("JAVA-SSRF", "ssrf", _r(r"new\s+URL\(|URI\.create\(|\.(getForObject|getForEntity)\(")),
         # new File(dossier, nom), Paths.get(base, nom) : le nom est souvent le 2e argument
@@ -207,6 +208,8 @@ _FUNCTION_START = {
 _ANNOTATED_PARAM = _r(r"@(RequestParam|PathVariable|RequestBody|RequestHeader)(\([^)]*\))?\s+(final\s+)?"
                       r"(?!(?:int|long|short|byte|double|float|boolean|Integer|Long|Short|Byte|Double|Float|Boolean"
                       r"|BigDecimal|BigInteger|UUID|LocalDate|LocalDateTime|Instant)\s)[\w<>\[\]]+\s+(\w+)")
+_SPRING_MAPPING = _r(r"@(Get|Post|Put|Delete|Patch|Request)Mapping\b")
+_SPRING_TEXT_PARAM = _r(r"(?:^|,)\s*(?:final\s+)?String\s+(\w+)\s*(?=[,)])")
 # ---------------------------------------------------------------------- C# (ASP.NET Core) et Go
 SOURCES["csharp"] = _r(r"\bRequest\.(Query|Form|Body|Headers|Cookies|RouteValues)\b|HttpContext\.Request\.")
 SOURCES["go"] = _r(r"\br\.URL\.Query\(\)|\br\.(FormValue|PostFormValue)\(|\br\.(Form|PostForm|Body)\b|"
@@ -411,18 +414,36 @@ def _depth(line: str) -> int:
     return depth
 
 
-def logical_lines(lines: list[str]):
+# Hors Python : instruction coupée après un opérateur (« String q = », « … + ») ou avant (« + name »)
+_ENDS_WITH_OPERATOR = _r(r"(?<![=!<>])=\s*$|(?<!\+)\+\s*$|\|\|\s*$|&&\s*$|(?<=[\s'\"\)])\.\s*$")
+_STARTS_WITH_OPERATOR = _r(r"^\s*(\+(?!\+)|\|\||&&|\.\s)")
+
+
+def _continues(lines: list[str], i: int, language: str | None) -> bool:
+    if language in (None, "python") or i + 1 >= len(lines):
+        return False
+    return bool(_ENDS_WITH_OPERATOR.search(lines[i]) or _STARTS_WITH_OPERATOR.match(lines[i + 1]))
+
+
+def logical_lines(lines: list[str], language: str | None = None):
     """(index de la première ligne, index de la dernière, texte de l'instruction complète)."""
     i, n = 0, len(lines)
     while i < n:
         start, text, depth = i, lines[i], _depth(lines[i])
-        while ((depth > 0 or lines[i].rstrip().endswith("\\")) and i + 1 < n and i - start < MAX_JOINED_LINES
+        while ((depth > 0 or lines[i].rstrip().endswith("\\") or _continues(lines, i, language))
+               and i + 1 < n and i - start < MAX_JOINED_LINES
                and not _BLOCK_START.search(lines[i]) and len(text) < MAX_LINE_LENGTH):
             i += 1
             text = text.rstrip().rstrip("\\") + " " + lines[i].strip()
             depth += _depth(lines[i])
         yield start, i, text
         i += 1
+
+
+# Échappement SQL : ne protège que si la valeur est ensuite placée entre guillemets dans la requête
+# (« WHERE id = '$id' ») ; « WHERE id = $id » reste injectable (« 1 OR 1=1 » n'a aucun guillemet à échapper).
+# PDO::quote ajoute lui-même les guillemets : il n'en fait pas partie.
+_SQL_ESCAPE_CALL = {"php": _r(r"\b(?:mysqli_real_escape_string|mysql_real_escape_string)\s*\(|->real_escape_string\s*\(")}
 
 
 class _Tainted:
@@ -432,6 +453,8 @@ class _Tainted:
         # nom → failles contre lesquelles la valeur n'a pas été nettoyée (absent : toutes)
         self.kinds: dict[str, frozenset] = {}
         self.assigned: dict[str, int] = {}  # nom → dernière ligne où la variable a été construite
+        # Valeurs échappées pour SQL : sûres dans une requête seulement entre guillemets
+        self.escaped: set[str] = set()
         self._patterns: dict[str, re.Pattern] = {}
 
     def _pattern(self, name: str) -> re.Pattern:
@@ -464,11 +487,36 @@ class _Tainted:
             previous, expr = expr, sanitizers.sub("0", expr)
         if SOURCES[self.language].search(expr):
             return ("entrée utilisateur", line_no)
+        raw = expr
         expr = _strip_plain_strings(_PLAIN_STRINGS[self.language], expr)
         for name, origin in self.vars.items():
             if kind in self.kinds.get(name, ALL_KINDS) and self._mentions(name, expr):
                 return (name, origin)
+        if kind == "sql":
+            for name in self.escaped:
+                if name in self.vars and self._unquoted(name, raw):
+                    return (name, self.vars[name])
         return None
+
+    def _unquoted(self, name: str, expr: str) -> bool:
+        """Une occurrence de la variable n'est pas entre apostrophes (« = $id » et non « = '$id' »)."""
+        for m in self._pattern(name).finditer(expr):
+            before = expr[:m.start()].rstrip("{")
+            after = expr[m.end():].lstrip("}")
+            if not (before.endswith("'") and after.startswith("'")):
+                return True
+        return False
+
+    def escapes_for_sql(self, expr: str, line_no: int) -> bool:
+        """L'expression échappe pour SQL une donnée non fiable (mysqli_real_escape_string($c, $id))."""
+        pattern = _SQL_ESCAPE_CALL.get(self.language)
+        if not pattern:
+            return False
+        for m in pattern.finditer(expr):
+            args = split_arguments(expr[m.end():])
+            if args and self.first_hit(args[-1], line_no):  # valeur échappée : dernier argument
+                return True
+        return False
 
     def still_tainted(self, expr: str, line_no: int) -> tuple[tuple[str, int] | None, frozenset]:
         """Pour une affectation : première origine non fiable, et failles pour lesquelles elle le reste."""
@@ -493,7 +541,7 @@ def find_flows(source: SourceFile, initial: dict[str, int] | None = None, first_
     # Portées ouvertes : (indentation, variables suivies juste avant cette fonction)
     scopes: list[tuple[int, dict, dict]] = []
     lines = source.content.split("\n")
-    for start, end, line in logical_lines(lines):
+    for start, end, line in logical_lines(lines, language):
         idx = first_line + start
         if not line.strip() or _COMMENT.match(line) or len(line) > MAX_LINE_LENGTH:
             continue
@@ -514,6 +562,11 @@ def find_flows(source: SourceFile, initial: dict[str, int] | None = None, first_
             if language == "java":
                 for m in _ANNOTATED_PARAM.finditer(line):
                     tainted.vars[m.group(4)] = idx
+                # Méthode d'un contrôleur Spring (@PostMapping…) : ses paramètres texte sans annotation sont
+                # aussi remplis à partir de la requête
+                if any(_SPRING_MAPPING.search(previous) for previous in lines[max(0, start - 4):start]):
+                    for m in _SPRING_TEXT_PARAM.finditer(line.split("(", 1)[-1]):
+                        tainted.vars[m.group(1)] = idx
             if controller and (action := _CS_ACTION.match(line)):
                 for m in _CS_TEXT_PARAM.finditer(action.group(3)):
                     tainted.vars[m.group(3)] = idx
@@ -545,6 +598,7 @@ def find_flows(source: SourceFile, initial: dict[str, int] | None = None, first_
                 s.kind in _RESULT_KINDS and s.pattern.search(rhs) for s in SINKS[language])
             safe = flagged or reads or _ALLOWLIST.search(assign.group(2))
             hit, kinds = (None, frozenset()) if safe else tainted.still_tainted(assign.group(2), idx)
+            escaped = bool(hit) and "sql" not in kinds and tainted.escapes_for_sql(assign.group(2), idx)
             augmented = "+=" in line or ".=" in line
             for name in _names(assign.group(1), language):
                 if hit:
@@ -553,9 +607,14 @@ def find_flows(source: SourceFile, initial: dict[str, int] | None = None, first_
                     # « $q .= $x » : la valeur cumule les failles possibles de ses morceaux
                     previous = tainted.kinds.get(name, ALL_KINDS) if augmented and name in tainted.vars else frozenset()
                     tainted.kinds[name] = kinds | previous
+                    if escaped:
+                        tainted.escaped.add(name)
+                    elif not augmented:
+                        tainted.escaped.discard(name)
                 elif not augmented:
                     tainted.vars.pop(name, None)  # réaffectée avec une valeur sûre
                     tainted.kinds.pop(name, None)
+                    tainted.escaped.discard(name)
         if (guard := _PREFIX_GUARDS[language].search(line)) and (
                 _EXIT.search(line[guard.end():]) or _EXIT.search(_next_code_line(lines, end))):
             name = next(g for g in guard.groups() if g)

@@ -1,0 +1,542 @@
+{
+  "description": "Projets publics volontairement vulnérables, figés à un commit. Vérité terrain écrite à partir de leur documentation, jamais utilisée pour régler les règles. Seuls les fichiers du périmètre (scope) sont comptés : hors de lui, une alerte n'est ni trouvée ni fausse.",
+  "sources": [
+    {
+      "name": "DVWA",
+      "repo": "https://github.com/digininja/DVWA.git",
+      "commit": "a1978a2fed195acd093010af6395f86a281537ca",
+      "description": "PHP — niveaux low / medium / high vulnérables, impossible = version sûre (faux positifs).",
+      "scope": [
+        "vulnerabilities/sqli/source/",
+        "vulnerabilities/sqli_blind/source/",
+        "vulnerabilities/exec/source/",
+        "vulnerabilities/xss_r/source/",
+        "vulnerabilities/upload/source/",
+        "vulnerabilities/open_redirect/source/",
+        "vulnerabilities/brute/source/",
+        "vulnerabilities/fi/index.php"
+      ],
+      "expected": {
+        "vulnerabilities/sqli/source/low.php": [
+          {
+            "contains": "mysqli_query($GLOBALS[\"___mysqli_ston\"],  $query ) or die",
+            "cwe": "CWE-89"
+          },
+          {
+            "contains": "$results = $sqlite_db_connection->query($query);",
+            "cwe": "CWE-89"
+          },
+          {
+            "contains": "$html .= \"<pre>ID: {$id}<br />First name: {$first}<br />Surname: {$last}</pre>\";",
+            "cwe": "CWE-79",
+            "nth": 1
+          },
+          {
+            "contains": "$html .= \"<pre>ID: {$id}<br />First name: {$first}<br />Surname: {$last}</pre>\";",
+            "cwe": "CWE-79",
+            "nth": 2
+          }
+        ],
+        "vulnerabilities/sqli/source/medium.php": [
+          {
+            "contains": "$result = mysqli_query($GLOBALS[\"___mysqli_ston\"], $query) or die",
+            "cwe": "CWE-89"
+          },
+          {
+            "contains": "$results = $sqlite_db_connection->query($query);",
+            "cwe": "CWE-89"
+          },
+          {
+            "contains": "$html .= \"<pre>ID: {$id}<br />First name: {$first}<br />Surname: {$last}</pre>\";",
+            "cwe": "CWE-79",
+            "nth": 1
+          },
+          {
+            "contains": "$html .= \"<pre>ID: {$id}<br />First name: {$first}<br />Surname: {$last}</pre>\";",
+            "cwe": "CWE-79",
+            "nth": 2
+          }
+        ],
+        "vulnerabilities/sqli/source/high.php": [
+          {
+            "contains": "mysqli_query($GLOBALS[\"___mysqli_ston\"], $query ) or die( '<pre>Something",
+            "cwe": "CWE-89"
+          },
+          {
+            "contains": "$results = $sqlite_db_connection->query($query);",
+            "cwe": "CWE-89"
+          },
+          {
+            "contains": "$html .= \"<pre>ID: {$id}<br />First name: {$first}<br />Surname: {$last}</pre>\";",
+            "cwe": "CWE-79",
+            "nth": 1
+          },
+          {
+            "contains": "$html .= \"<pre>ID: {$id}<br />First name: {$first}<br />Surname: {$last}</pre>\";",
+            "cwe": "CWE-79",
+            "nth": 2
+          }
+        ],
+        "vulnerabilities/sqli_blind/source/low.php": [
+          {
+            "contains": "mysqli_query($GLOBALS[\"___mysqli_ston\"],  $query ); // Removed",
+            "cwe": "CWE-89"
+          },
+          {
+            "contains": "$results = $sqlite_db_connection->query($query);",
+            "cwe": "CWE-89"
+          }
+        ],
+        "vulnerabilities/sqli_blind/source/medium.php": [
+          {
+            "contains": "mysqli_query($GLOBALS[\"___mysqli_ston\"],  $query ); // Removed",
+            "cwe": "CWE-89"
+          },
+          {
+            "contains": "$results = $sqlite_db_connection->query($query);",
+            "cwe": "CWE-89"
+          }
+        ],
+        "vulnerabilities/sqli_blind/source/high.php": [
+          {
+            "contains": "mysqli_query($GLOBALS[\"___mysqli_ston\"],  $query ); // Removed",
+            "cwe": "CWE-89"
+          },
+          {
+            "contains": "$results = $sqlite_db_connection->query($query);",
+            "cwe": "CWE-89"
+          }
+        ],
+        "vulnerabilities/exec/source/low.php": [
+          {
+            "contains": "$cmd = shell_exec( 'ping  ' . $target );",
+            "cwe": "CWE-78"
+          },
+          {
+            "contains": "$cmd = shell_exec( 'ping  -c 4 ' . $target );",
+            "cwe": "CWE-78"
+          }
+        ],
+        "vulnerabilities/exec/source/medium.php": [
+          {
+            "contains": "$cmd = shell_exec( 'ping  ' . $target );",
+            "cwe": "CWE-78"
+          },
+          {
+            "contains": "$cmd = shell_exec( 'ping  -c 4 ' . $target );",
+            "cwe": "CWE-78"
+          }
+        ],
+        "vulnerabilities/exec/source/high.php": [
+          {
+            "contains": "$cmd = shell_exec( 'ping  ' . $target );",
+            "cwe": "CWE-78"
+          },
+          {
+            "contains": "$cmd = shell_exec( 'ping  -c 4 ' . $target );",
+            "cwe": "CWE-78"
+          }
+        ],
+        "vulnerabilities/xss_r/source/low.php": [
+          {
+            "contains": "$html .= '<pre>Hello ' . $_GET[ 'name' ] . '</pre>';",
+            "cwe": "CWE-79"
+          }
+        ],
+        "vulnerabilities/xss_r/source/medium.php": [
+          {
+            "contains": "$html .= \"<pre>Hello {$name}</pre>\";",
+            "cwe": "CWE-79"
+          }
+        ],
+        "vulnerabilities/xss_r/source/high.php": [
+          {
+            "contains": "$html .= \"<pre>Hello {$name}</pre>\";",
+            "cwe": "CWE-79"
+          }
+        ],
+        "vulnerabilities/fi/index.php": [
+          {
+            "contains": "include( $file );",
+            "cwe": "CWE-98"
+          }
+        ],
+        "vulnerabilities/upload/source/low.php": [
+          {
+            "contains": "if( !move_uploaded_file(",
+            "cwe": "CWE-434"
+          },
+          {
+            "contains": "succesfully uploaded!</pre>\";",
+            "cwe": "CWE-79"
+          }
+        ],
+        "vulnerabilities/upload/source/medium.php": [
+          {
+            "contains": "if( !move_uploaded_file(",
+            "cwe": "CWE-434"
+          },
+          {
+            "contains": "succesfully uploaded!</pre>\";",
+            "cwe": "CWE-79"
+          }
+        ],
+        "vulnerabilities/upload/source/high.php": [
+          {
+            "contains": "succesfully uploaded!</pre>\";",
+            "cwe": "CWE-79"
+          }
+        ],
+        "vulnerabilities/open_redirect/source/low.php": [
+          {
+            "contains": "header (\"location: \" . $_GET['redirect']);",
+            "cwe": "CWE-601"
+          }
+        ],
+        "vulnerabilities/open_redirect/source/medium.php": [
+          {
+            "contains": "header (\"location: \" . $_GET['redirect']);",
+            "cwe": "CWE-601"
+          }
+        ],
+        "vulnerabilities/open_redirect/source/high.php": [
+          {
+            "contains": "header (\"location: \" . $_GET['redirect']);",
+            "cwe": "CWE-601"
+          }
+        ],
+        "vulnerabilities/brute/source/low.php": [
+          {
+            "contains": "mysqli_query($GLOBALS[\"___mysqli_ston\"],  $query ) or die",
+            "cwe": "CWE-89"
+          },
+          {
+            "contains": "$pass = md5( $pass );",
+            "cwe": "CWE-916"
+          },
+          {
+            "contains": "$html .= \"<p>Welcome to the password protected area {$user}</p>\";",
+            "cwe": "CWE-79"
+          }
+        ],
+        "vulnerabilities/brute/source/medium.php": [
+          {
+            "contains": "$pass = md5( $pass );",
+            "cwe": "CWE-916"
+          }
+        ],
+        "vulnerabilities/brute/source/high.php": [
+          {
+            "contains": "$pass = md5( $pass );",
+            "cwe": "CWE-916"
+          }
+        ],
+        "vulnerabilities/brute/source/impossible.php": [
+          {
+            "contains": "$pass = md5( $pass );",
+            "cwe": "CWE-916"
+          }
+        ]
+      }
+    },
+    {
+      "name": "NodeGoat",
+      "repo": "https://github.com/OWASP/NodeGoat.git",
+      "commit": "c5cb68a7084e4ae7dcc60e6a98768720a81841e8",
+      "description": "JavaScript (Express) — tutoriel OWASP Top 10 ; failles logiques comprises.",
+      "scope": [
+        "app/routes/",
+        "app/data/",
+        "server.js"
+      ],
+      "expected": {
+        "app/routes/contributions.js": [
+          {
+            "contains": "const preTax = eval(req.body.preTax);",
+            "cwe": "CWE-95"
+          },
+          {
+            "contains": "const afterTax = eval(req.body.afterTax);",
+            "cwe": "CWE-95"
+          },
+          {
+            "contains": "const roth = eval(req.body.roth);",
+            "cwe": "CWE-95"
+          }
+        ],
+        "app/data/allocations-dao.js": [
+          {
+            "contains": "this.stocks > '${threshold}'",
+            "cwe": "CWE-943"
+          }
+        ],
+        "app/routes/research.js": [
+          {
+            "contains": "return needle.get(url, (error, newResponse, body) => {",
+            "cwe": "CWE-918"
+          }
+        ],
+        "app/routes/index.js": [
+          {
+            "contains": "return res.redirect(req.query.url);",
+            "cwe": "CWE-601"
+          },
+          {
+            "contains": "app.post(\"/benefits\", isLoggedIn, benefitsHandler.updateBenefits);",
+            "cwe": "CWE-285"
+          }
+        ],
+        "server.js": [
+          {
+            "contains": "autoescape: false",
+            "cwe": "CWE-79"
+          }
+        ],
+        "app/routes/profile.js": [
+          {
+            "contains": "const regexPattern = /([0-9]+)+\\#/;",
+            "cwe": "CWE-1333"
+          }
+        ],
+        "app/routes/session.js": [
+          {
+            "contains": "console.log(\"Error: attempt to login with invalid user: \", userName);",
+            "cwe": "CWE-117"
+          }
+        ],
+        "app/routes/allocations.js": [
+          {
+            "contains": "} = req.params;",
+            "cwe": "CWE-639"
+          }
+        ],
+        "app/data/user-dao.js": [
+          {
+            "contains": "password //received from request param",
+            "cwe": "CWE-256"
+          }
+        ]
+      }
+    },
+    {
+      "name": "WebGoat",
+      "repo": "https://github.com/WebGoat/WebGoat.git",
+      "commit": "e7b131360d74336c0c94ab5c8a21259503f59be8",
+      "description": "Java (Spring) — leçons d'injection, XXE, désérialisation, SSRF, JWT, chemins, crypto.",
+      "scope": [
+        "src/main/java/org/owasp/webgoat/lessons/sqlinjection/",
+        "src/main/java/org/owasp/webgoat/lessons/pathtraversal/",
+        "src/main/java/org/owasp/webgoat/lessons/xxe/",
+        "src/main/java/org/owasp/webgoat/lessons/deserialization/",
+        "src/main/java/org/owasp/webgoat/lessons/ssrf/",
+        "src/main/java/org/owasp/webgoat/lessons/openredirect/",
+        "src/main/java/org/owasp/webgoat/lessons/cryptography/",
+        "src/main/java/org/owasp/webgoat/lessons/jwt/",
+        "src/main/java/org/owasp/webgoat/lessons/vulnerablecomponents/"
+      ],
+      "expected": {
+        "src/main/java/org/owasp/webgoat/lessons/sqlinjection/introduction/SqlInjectionLesson2.java": [
+          {
+            "contains": "ResultSet results = statement.executeQuery(query);",
+            "cwe": "CWE-89"
+          }
+        ],
+        "src/main/java/org/owasp/webgoat/lessons/sqlinjection/introduction/SqlInjectionLesson3.java": [
+          {
+            "contains": "statement.executeUpdate(query);",
+            "cwe": "CWE-89"
+          }
+        ],
+        "src/main/java/org/owasp/webgoat/lessons/sqlinjection/introduction/SqlInjectionLesson4.java": [
+          {
+            "contains": "statement.executeUpdate(query);",
+            "cwe": "CWE-89"
+          }
+        ],
+        "src/main/java/org/owasp/webgoat/lessons/sqlinjection/introduction/SqlInjectionLesson5.java": [
+          {
+            "contains": "        statement.executeQuery(query);",
+            "cwe": "CWE-89"
+          }
+        ],
+        "src/main/java/org/owasp/webgoat/lessons/sqlinjection/introduction/SqlInjectionLesson5a.java": [
+          {
+            "contains": "and last_name = '\" + accountName + \"'\";",
+            "cwe": "CWE-89"
+          }
+        ],
+        "src/main/java/org/owasp/webgoat/lessons/sqlinjection/introduction/SqlInjectionLesson5b.java": [
+          {
+            "contains": "WHERE Login_Count = ? and userid= \" + accountName;",
+            "cwe": "CWE-89"
+          }
+        ],
+        "src/main/java/org/owasp/webgoat/lessons/sqlinjection/introduction/SqlInjectionLesson8.java": [
+          {
+            "contains": "ResultSet results = statement.executeQuery(query);",
+            "cwe": "CWE-89"
+          },
+          {
+            "contains": "\"INSERT INTO access_log (time, action) VALUES ('\" + time",
+            "cwe": "CWE-89"
+          }
+        ],
+        "src/main/java/org/owasp/webgoat/lessons/sqlinjection/introduction/SqlInjectionLesson9.java": [
+          {
+            "contains": "statement.execute(queryInjection);",
+            "cwe": "CWE-89"
+          }
+        ],
+        "src/main/java/org/owasp/webgoat/lessons/sqlinjection/introduction/SqlInjectionLesson10.java": [
+          {
+            "contains": "WHERE action LIKE '%\" + action + \"%'\";",
+            "cwe": "CWE-89"
+          }
+        ],
+        "src/main/java/org/owasp/webgoat/lessons/sqlinjection/advanced/SqlInjectionLesson6a.java": [
+          {
+            "contains": "WHERE last_name = '\" + accountName + \"'\";",
+            "cwe": "CWE-89"
+          }
+        ],
+        "src/main/java/org/owasp/webgoat/lessons/sqlinjection/advanced/SqlInjectionChallenge.java": [
+          {
+            "contains": "where userid = '\" + username + \"'\";",
+            "cwe": "CWE-89"
+          }
+        ],
+        "src/main/java/org/owasp/webgoat/lessons/sqlinjection/mitigation/Servers.java": [
+          {
+            "contains": "connection.prepareStatement(",
+            "cwe": "CWE-89"
+          }
+        ],
+        "src/main/java/org/owasp/webgoat/lessons/pathtraversal/ProfileUploadBase.java": [
+          {
+            "contains": "var uploadedFile = new File(uploadDirectory, fullName);",
+            "cwe": "CWE-22"
+          }
+        ],
+        "src/main/java/org/owasp/webgoat/lessons/pathtraversal/ProfileUploadRetrieval.java": [
+          {
+            "contains": "new File(catPicturesDirectory, (id == null",
+            "cwe": "CWE-22"
+          }
+        ],
+        "src/main/java/org/owasp/webgoat/lessons/pathtraversal/ProfileZipSlip.java": [
+          {
+            "contains": "File f = new File(tmpZipDirectory.toFile(), e.getName());",
+            "cwe": "CWE-22"
+          }
+        ],
+        "src/main/java/org/owasp/webgoat/lessons/xxe/CommentsCache.java": [
+          {
+            "contains": "var xif = XMLInputFactory.newInstance();",
+            "cwe": "CWE-611"
+          }
+        ],
+        "src/main/java/org/owasp/webgoat/lessons/deserialization/InsecureDeserializationTask.java": [
+          {
+            "contains": "new ObjectInputStream(new ByteArrayInputStream(",
+            "cwe": "CWE-502"
+          }
+        ],
+        "src/main/java/org/owasp/webgoat/lessons/deserialization/SerializationHelper.java": [
+          {
+            "contains": "ObjectInputStream ois = new ObjectInputStream(",
+            "cwe": "CWE-502"
+          }
+        ],
+        "src/main/java/org/owasp/webgoat/lessons/ssrf/SSRFTask2.java": [
+          {
+            "contains": "try (InputStream in = new URL(url).openStream()) {",
+            "cwe": "CWE-918"
+          }
+        ],
+        "src/main/java/org/owasp/webgoat/lessons/openredirect/OpenRedirectRealRedirect.java": [
+          {
+            "contains": "return new ModelAndView(\"redirect:\" + url);",
+            "cwe": "CWE-601"
+          }
+        ],
+        "src/main/java/org/owasp/webgoat/lessons/cryptography/HashingAssignment.java": [
+          {
+            "contains": "MessageDigest.getInstance(\"MD5\");",
+            "cwe": "CWE-328"
+          },
+          {
+            "contains": "String secret = SECRETS[new Random().nextInt(SECRETS.length)];",
+            "cwe": "CWE-338",
+            "nth": 1
+          },
+          {
+            "contains": "String secret = SECRETS[new Random().nextInt(SECRETS.length)];",
+            "cwe": "CWE-338",
+            "nth": 2
+          }
+        ],
+        "src/main/java/org/owasp/webgoat/lessons/cryptography/EncodingAssignment.java": [
+          {
+            "contains": "HashingAssignment.SECRETS[new Random().nextInt(",
+            "cwe": "CWE-338"
+          }
+        ],
+        "src/main/java/org/owasp/webgoat/lessons/jwt/JWTSecretKeyEndpoint.java": [
+          {
+            "contains": "TextCodec.BASE64.encode(SECRETS[new Random().nextInt(",
+            "cwe": "CWE-338"
+          }
+        ],
+        "src/main/java/org/owasp/webgoat/lessons/jwt/JWTRefreshEndpoint.java": [
+          {
+            "contains": "public static final String PASSWORD = ",
+            "cwe": "CWE-798"
+          },
+          {
+            "contains": "private static final String JWT_PASSWORD = ",
+            "cwe": "CWE-798"
+          },
+          {
+            "contains": ".parse(token.replace(\"Bearer \", \"\"));",
+            "cwe": "CWE-347",
+            "nth": 1
+          },
+          {
+            "contains": ".parse(token.replace(\"Bearer \", \"\"));",
+            "cwe": "CWE-347",
+            "nth": 2
+          }
+        ],
+        "src/main/java/org/owasp/webgoat/lessons/jwt/JWTVotesEndpoint.java": [
+          {
+            "contains": "Jwt jwt = Jwts.parser().setSigningKey(JWT_PASSWORD).parse(accessToken);",
+            "cwe": "CWE-347",
+            "nth": 1
+          },
+          {
+            "contains": "Jwt jwt = Jwts.parser().setSigningKey(JWT_PASSWORD).parse(accessToken);",
+            "cwe": "CWE-347",
+            "nth": 2
+          },
+          {
+            "contains": "Jwt jwt = Jwts.parser().setSigningKey(JWT_PASSWORD).parse(accessToken);",
+            "cwe": "CWE-347",
+            "nth": 3
+          }
+        ],
+        "src/main/java/org/owasp/webgoat/lessons/jwt/claimmisuse/JWTHeaderKIDEndpoint.java": [
+          {
+            "contains": "\"SELECT key FROM jwt_keys WHERE id = '\" + kid + \"'\");",
+            "cwe": "CWE-89"
+          }
+        ],
+        "src/main/java/org/owasp/webgoat/lessons/vulnerablecomponents/VulnerableComponentsLesson.java": [
+          {
+            "contains": "contact = (Contact) xstream.fromXML(payload);",
+            "cwe": "CWE-502"
+          }
+        ]
+      }
+    }
+  ]
+}

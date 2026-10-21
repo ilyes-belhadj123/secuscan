@@ -4,12 +4,15 @@ Usage (dans apps/api) :
     uv run python -m secuscan.benchmark                 # règles seules, hors ligne (CI)
     uv run python -m secuscan.benchmark --ai            # règles + IA (clé OpenRouter requise)
     uv run python -m secuscan.benchmark --min-recall 0.6
+    uv run python -m secuscan.benchmark --external      # projets publics vulnérables (DVWA, NodeGoat, WebGoat)
 
 Le corpus et sa vérité terrain sont dans benchmark/ (racine du dépôt). Les dépendances (SCA)
 sont exclues : leur détection dépend de la base OSV, pas du moteur d'analyse.
 """
 import argparse
+import fnmatch
 import json
+import subprocess
 import sys
 import tempfile
 from dataclasses import dataclass, field
@@ -88,25 +91,49 @@ class Result:
         }
 
 
-def load_expected(path: Path) -> list[tuple[Path, list[Expected]]]:
+_GIT = ["git", "-c", "core.hooksPath=/dev/null", "-c", "core.fsmonitor=false", "-c", "core.longpaths=true",
+        "-c", "core.autocrlf=false", "--no-pager"]
+
+
+def fetch_source(src: dict, cache: Path) -> Path:
+    """Projet public figé à un commit précis, téléchargé une fois dans le cache (hors du dépôt)."""
+    dest = cache / src["name"]
+    head = subprocess.run([*_GIT, "-C", str(dest), "rev-parse", "HEAD"], capture_output=True, text=True) \
+        if (dest / ".git").is_dir() else None
+    if head is None or head.stdout.strip() != src["commit"]:
+        dest.mkdir(parents=True, exist_ok=True)
+        for args in (["init", "-q"], ["fetch", "-q", "--depth", "1", src["repo"], src["commit"]],
+                     ["checkout", "-q", "--force", "FETCH_HEAD"]):
+            subprocess.run([*_GIT, "-C", str(dest), *args], check=True, capture_output=True, timeout=600)
+    return dest
+
+
+def in_scope(rel: str, scope: list[str] | None) -> bool:
+    """Périmètre annoté : hors de lui, une alerte n'est comptée ni comme trouvée ni comme faux positif."""
+    return scope is None or any(rel.startswith(p) if p.endswith("/") else fnmatch.fnmatch(rel, p) for p in scope)
+
+
+def load_expected(path: Path, cache: Path | None = None) -> list[tuple[Path, list[Expected], list[str] | None]]:
     data = json.loads(path.read_text(encoding="utf-8"))
     sources = []
     for src in data["sources"]:
-        root = REPO_ROOT / src["path"]
+        root = fetch_source(src, cache or Path(tempfile.gettempdir()) / "secuscan-benchmark") if "repo" in src \
+            else REPO_ROOT / src["path"]
         items = []
         for rel, entries in src["expected"].items():
-            lines = (root / rel).read_text(encoding="utf-8").split("\n")
+            lines = (root / rel).read_text(encoding="utf-8", errors="replace").split("\n")
             for entry in entries:
                 hits = [i for i, line in enumerate(lines, start=1) if entry["contains"] in line]
-                if len(hits) != 1:
+                nth = entry.get("nth")  # ancre répétée dans le fichier : n-ième occurrence (à partir de 1)
+                if nth is None and len(hits) != 1 or nth is not None and len(hits) < nth:
                     raise ValueError(f"{src['name']}/{rel} : ancre « {entry['contains']} » trouvée {len(hits)} fois")
-                items.append(Expected(src["name"], rel, hits[0], entry["cwe"], entry["contains"]))
-        sources.append((root, items))
+                items.append(Expected(src["name"], rel, hits[(nth or 1) - 1], entry["cwe"], entry["contains"]))
+        sources.append((root, items, src.get("scope")))
     return sources
 
 
-def match(expected: list[Expected], findings: list[Finding], result: Result) -> None:
-    code_findings = [f for f in findings if f.kind != "dependency"]
+def match(expected: list[Expected], findings: list[Finding], result: Result, scope: list[str] | None = None) -> None:
+    code_findings = [f for f in findings if f.kind != "dependency" and in_scope(f.file, scope)]
     result.rejected_by_ai += sum(1 for f in code_findings if f.status == "false_positive")
     for f in code_findings:
         if f.status == "open" and f.ai and f.ai.fix:
@@ -128,7 +155,7 @@ def match(expected: list[Expected], findings: list[Finding], result: Result) -> 
             result.false_positives.append(f)
 
 
-def run(with_ai: bool, truth: Path) -> Result:
+def run(with_ai: bool, truth: Path, cache: Path | None = None) -> Result:
     base = get_settings()
     result = Result(mode="règles + IA" if with_ai else "règles seules")
     with tempfile.TemporaryDirectory(prefix="secuscan-bench-") as tmp:
@@ -143,10 +170,10 @@ def run(with_ai: bool, truth: Path) -> Result:
         # Le cache IA de la démo est réutilisé pour éviter de repayer les mêmes appels
         storage = Storage(base.data_dir / "secuscan.db") if with_ai else Storage(Path(tmp) / "bench.db")
         service = ScanService(settings, storage)
-        for root, expected in load_expected(truth):
+        for root, expected, scope in load_expected(truth, cache):
             scan = Scan(id=new_id(), project_name=f"benchmark:{root.name}", source="upload")
             storage.save_scan(scan)
-            match(expected, service.run(scan, root), result)
+            match(expected, service.run(scan, root), result, scope)
             result.expected += expected
             sm = scan.summary
             result.ai_calls += sm.ai_calls
@@ -207,14 +234,21 @@ def main() -> int:
     parser = argparse.ArgumentParser(description="Benchmark de détection SecuScan (SS-8)")
     parser.add_argument("--ai", action="store_true", help="active la validation et la revue logique IA")
     parser.add_argument("--min-recall", type=float, default=0.0, help="échec si le taux de détection est inférieur")
-    parser.add_argument("--truth", type=Path, default=BENCHMARK_DIR / "ground_truth.json")
+    parser.add_argument("--truth", type=Path, default=None)
+    parser.add_argument("--external", action="store_true",
+                        help="projets publics vulnérables figés (benchmark/external.json), annotés à part")
+    parser.add_argument("--cache", type=Path, default=None, help="dossier de téléchargement des projets externes")
     parser.add_argument("--output", type=Path, default=None, help="fichier Markdown du rapport")
     args = parser.parse_args()
 
-    result = run(args.ai, args.truth)
+    truth = args.truth or BENCHMARK_DIR / ("external.json" if args.external else "ground_truth.json")
+    result = run(args.ai, truth, args.cache)
+    if args.external:
+        result.mode += " · projets externes"
     report = to_markdown(result)
     print(report)
-    output = args.output or BENCHMARK_DIR / "results" / ("latest-ai.md" if args.ai else "latest-rules.md")
+    name = ("latest-external-" if args.external else "latest-") + ("ai.md" if args.ai else "rules.md")
+    output = args.output or BENCHMARK_DIR / "results" / name
     output.parent.mkdir(parents=True, exist_ok=True)
     output.write_text(report, encoding="utf-8")
     print(f"Rapport écrit dans {output}")
