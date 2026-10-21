@@ -11,7 +11,7 @@ from ..models import Severity
 from .comments import without_block_comments
 from .iac import IAC_LANGUAGES, file_findings
 from .rules import RULES, RULES_BY_ID, Rule
-from .taint import _ALLOWLIST, describe, find_flows
+from .taint import _ALLOWLIST, MAX_LINE_LENGTH, describe, find_flows
 
 _COMMENT_LINE = re.compile(r"^\s*(#|//|/\*|\*)")
 
@@ -95,7 +95,7 @@ def analyze_file(source: SourceFile, rules: list[Rule] = RULES) -> list[RawFindi
     offset = 0  # position du début de la ligne dans le fichier
     for idx, line in enumerate(lines):
         line_start, offset = offset, offset + len(line) + 1
-        if not line.strip() or _COMMENT_LINE.match(line):
+        if not line.strip() or _COMMENT_LINE.match(line) or len(line) > MAX_LINE_LENGTH:
             continue
         for rule in applicable:
             if not rule.pattern.search(line):

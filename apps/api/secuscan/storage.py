@@ -174,6 +174,16 @@ CREATE TABLE IF NOT EXISTS jobs (
     created_at TEXT NOT NULL
 );
 CREATE INDEX IF NOT EXISTS idx_jobs_status ON jobs(status, created_at);
+CREATE TABLE IF NOT EXISTS ai_usage (
+    org_id TEXT NOT NULL,
+    user_id TEXT NOT NULL DEFAULT '',
+    source TEXT NOT NULL,
+    day TEXT NOT NULL,
+    tokens INTEGER NOT NULL,
+    calls INTEGER NOT NULL,
+    cost_usd REAL NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_ai_usage_day ON ai_usage(day, org_id);
 CREATE TABLE IF NOT EXISTS stripe_events (
     id TEXT PRIMARY KEY,
     received_at TEXT NOT NULL
@@ -518,6 +528,31 @@ class Storage:
         """True la première fois qu'un événement est reçu : Stripe peut renvoyer le même plusieurs fois."""
         with self._lock, self._conn() as conn:
             return conn.execute("INSERT OR IGNORE INTO stripe_events VALUES (?, ?)", (event_id, now_iso())).rowcount == 1
+
+    # --- Consommation IA (plafonds mensuels) ---------------------------
+    def add_ai_usage(self, org_id: str, source: str, tokens: int, calls: int, cost_usd: float,
+                     user_id: str = "") -> None:
+        """Une ligne par analyse ou avis de formation, réussi ou non (les jetons sont dépensés)."""
+        if not (tokens or calls):
+            return
+        with self._conn() as conn:
+            conn.execute("INSERT INTO ai_usage VALUES (?, ?, ?, ?, ?, ?, ?)",
+                         (org_id, user_id, source, now_iso()[:10], tokens, calls, cost_usd))
+
+    def ai_tokens_since(self, day: str, org_id: str | None = None) -> int:
+        """Jetons consommés depuis `day` (AAAA-MM-JJ), par une organisation ou par toute l'installation."""
+        with self._conn() as conn:
+            if org_id is None:
+                row = conn.execute("SELECT COALESCE(SUM(tokens), 0) FROM ai_usage WHERE day >= ?", (day,)).fetchone()
+            else:
+                row = conn.execute("SELECT COALESCE(SUM(tokens), 0) FROM ai_usage WHERE day >= ? AND org_id = ?",
+                                   (day, org_id)).fetchone()
+            return int(row[0])
+
+    def ai_uses_on(self, day: str, source: str, user_id: str) -> int:
+        with self._conn() as conn:
+            return conn.execute("SELECT COUNT(*) FROM ai_usage WHERE day = ? AND source = ? AND user_id = ?",
+                                (day, source, user_id)).fetchone()[0]
 
     # --- Mode formation (SS-24) ----------------------------------------
     def record_training_attempt(self, org_id: str, user_id: str, exercise_id: str, passed: bool, code: str) -> None:

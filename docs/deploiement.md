@@ -32,7 +32,9 @@ Docker) avec au minimum :
 |---|---|
 | `SECUSCAN_TOKEN_KEY` | Clé AES-256 en base64 qui chiffre les jetons GitHub / GitLab (`python -c "import base64, os; print(base64.b64encode(os.urandom(32)).decode())"`) |
 | `SECUSCAN_SMTP_HOST`, `SECUSCAN_SMTP_PORT`, `SECUSCAN_SMTP_USER`, `SECUSCAN_SMTP_PASSWORD`, `SECUSCAN_SMTP_FROM` | Envoi des invitations et des liens de mot de passe oublié |
-| `SECUSCAN_OPERATOR_EMAILS` | Opérateurs de la plateforme (tableau de bord bêta, écran « Paramètres »), format JSON : `["jane.doe@example.com"]` |
+| `SECUSCAN_OPERATOR_EMAILS` | **Obligatoire.** Opérateurs de la plateforme, seuls autorisés à régler la clé IA (écran « Paramètres ») et à voir le tableau de bord bêta ; format JSON : `["jane.doe@example.com"]`. Le premier inscrit ne devient pas administrateur de l'installation |
+| `SECUSCAN_AI_MONTHLY_TOKENS_TOTAL` | Recommandé : plafond mensuel de jetons IA pour toute l'installation (ex. `100000000`), qui protège le crédit OpenRouter. Chaque organisation a en plus son plafond mensuel selon son offre (Free 0,6 M, Pro 15 M, Business 60 M) |
+| `SECUSCAN_BILLING_DEMO` | `true` seulement pour une démonstration : changement d'offre sans paiement. Sinon, sans Stripe configuré, seul un opérateur peut changer l'offre d'une organisation |
 | `SECUSCAN_GITHUB_CLIENT_ID`, `SECUSCAN_GITHUB_CLIENT_SECRET` | Facultatif : dépôts privés GitHub ([guide](connexion-github.md)), adresse de retour `https://DOMAINE/api/git/github/callback` |
 
 **Clé OpenRouter et modèle** : renseignez-les depuis l'écran **Paramètres** une fois connecté. Ils

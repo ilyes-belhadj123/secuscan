@@ -122,8 +122,17 @@ class _Provider:
 
 
 class GitHub(_Provider):
-    def __init__(self, client: httpx.Client, repo: str, number: int, head_sha: str):
+    # Auteur des commentaires publiés avec le jeton du job (GITHUB_TOKEN) ; SECUSCAN_BOT_LOGIN pour un autre jeton
+    DEFAULT_BOT = "github-actions[bot]"
+
+    def __init__(self, client: httpx.Client, repo: str, number: int, head_sha: str, bot_login: str = DEFAULT_BOT):
         self.client, self.repo, self.number, self.head_sha = client, repo, number, head_sha
+        self.bot_login = bot_login
+
+    def _ours(self, comment: dict) -> bool:
+        """Seuls les commentaires du bot comptent : un participant de la PR pourrait sinon recopier nos
+        marqueurs pour faire taire des alertes, ou bloquer la mise à jour de la synthèse."""
+        return (comment.get("user") or {}).get("login") == self.bot_login
 
     @classmethod
     def from_env(cls, env: Mapping[str, str], client: httpx.Client | None = None) -> "GitHub":
@@ -138,14 +147,16 @@ class GitHub(_Provider):
             headers={"Authorization": f"Bearer {token}", "Accept": "application/vnd.github+json",
                      "X-GitHub-Api-Version": "2022-11-28"},
         )
-        return cls(client, repo, int(pr["number"]), str(pr["head"]["sha"]))
+        return cls(client, repo, int(pr["number"]), str(pr["head"]["sha"]),
+                   env.get("SECUSCAN_BOT_LOGIN") or cls.DEFAULT_BOT)
 
     def changed_lines(self) -> dict[str, set[int]]:
         files = self._pages(f"/repos/{self.repo}/pulls/{self.number}/files")
         return {f["filename"]: added_lines(f.get("patch") or "") for f in files}
 
     def existing_bodies(self) -> list[str]:
-        return [c.get("body") or "" for c in self._pages(f"/repos/{self.repo}/pulls/{self.number}/comments")]
+        return [c.get("body") or "" for c in self._pages(f"/repos/{self.repo}/pulls/{self.number}/comments")
+                if self._ours(c)]
 
     def post_inline(self, comments: list[tuple[Finding, int, str]]) -> None:
         resp = self.client.post(f"/repos/{self.repo}/pulls/{self.number}/reviews", json={
@@ -157,7 +168,7 @@ class GitHub(_Provider):
 
     def upsert_summary(self, body: str) -> None:
         comments = self._pages(f"/repos/{self.repo}/issues/{self.number}/comments")
-        existing = next((c for c in comments if SUMMARY_MARKER in (c.get("body") or "")), None)
+        existing = next((c for c in comments if self._ours(c) and SUMMARY_MARKER in (c.get("body") or "")), None)
         if existing:
             resp = self.client.patch(f"/repos/{self.repo}/issues/comments/{existing['id']}", json={"body": body})
         else:
@@ -166,9 +177,13 @@ class GitHub(_Provider):
 
 
 class GitLab(_Provider):
-    def __init__(self, client: httpx.Client, project: str, iid: str, diff_refs: dict):
+    def __init__(self, client: httpx.Client, project: str, iid: str, diff_refs: dict, bot_id: int | None = None):
         self.client, self.project, self.iid, self.diff_refs = client, project, iid, diff_refs
         self.base = f"/projects/{project}/merge_requests/{iid}"
+        self.bot_id = bot_id  # utilisateur du jeton : seuls ses commentaires comptent
+
+    def _ours(self, note: dict) -> bool:
+        return (note.get("author") or {}).get("id") == self.bot_id
 
     @classmethod
     def from_env(cls, env: Mapping[str, str], client: httpx.Client | None = None) -> "GitLab":
@@ -182,14 +197,17 @@ class GitLab(_Provider):
         client = client or httpx.Client(base_url=api, timeout=30, headers={"PRIVATE-TOKEN": token})
         resp = client.get(f"/projects/{project}/merge_requests/{iid}")
         resp.raise_for_status()
-        return cls(client, project, iid, resp.json()["diff_refs"])
+        me = client.get("/user")
+        me.raise_for_status()
+        return cls(client, project, iid, resp.json()["diff_refs"], me.json().get("id"))
 
     def changed_lines(self) -> dict[str, set[int]]:
         diffs = self._pages(f"{self.base}/diffs")
         return {d["new_path"]: added_lines(d.get("diff") or "") for d in diffs if not d.get("deleted_file")}
 
     def existing_bodies(self) -> list[str]:
-        return [n.get("body") or "" for d in self._pages(f"{self.base}/discussions") for n in d.get("notes", [])]
+        return [n.get("body") or "" for d in self._pages(f"{self.base}/discussions") for n in d.get("notes", [])
+                if self._ours(n)]
 
     def post_inline(self, comments: list[tuple[Finding, int, str]]) -> None:
         refs = self.diff_refs
@@ -202,7 +220,7 @@ class GitLab(_Provider):
 
     def upsert_summary(self, body: str) -> None:
         notes = self._pages(f"{self.base}/notes")
-        existing = next((n for n in notes if SUMMARY_MARKER in (n.get("body") or "")), None)
+        existing = next((n for n in notes if self._ours(n) and SUMMARY_MARKER in (n.get("body") or "")), None)
         if existing:
             resp = self.client.put(f"{self.base}/notes/{existing['id']}", json={"body": body})
         else:

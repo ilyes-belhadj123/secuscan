@@ -10,6 +10,14 @@ REPO_ROOT = API_ROOT.parent.parent
 DEMO_PROJECT_DIR = REPO_ROOT / "demo" / "acme-shop"
 
 
+# Plafond mensuel de jetons IA par organisation, selon l'offre (toutes analyses et formation confondues).
+# Ordres de grandeur au tarif de Claude Sonnet 5 : Free ≈ 2 $, Pro ≈ 45 $, Business ≈ 180 $ par mois
+PLAN_AI_MONTHLY_TOKENS = {
+    "free": 600_000,
+    "pro": 15_000_000,
+    "business": 60_000_000,
+}
+
 # Budget IA par analyse et par offre : (appels max, jetons max)
 PLAN_AI_BUDGETS = {
     "free": (40, 120_000),
@@ -106,6 +114,9 @@ class Settings(BaseSettings):
     secuscan_price_business_eur: float = 79.0
     # Secret partagé avec le prestataire de paiement pour signer les webhooks (vide : webhook désactivé)
     secuscan_billing_webhook_secret: str = ""
+    # Changement d'offre sans paiement (démonstration). En production, il est refusé sauf aux opérateurs,
+    # tant que Stripe n'est pas configuré : sinon chacun s'attribuerait l'offre Business, payée par la clé IA
+    secuscan_billing_demo: bool = False
     # Stripe (paiement réel) : clé secrète (sk_test_… en test), secret de signature du webhook (whsec_…)
     # et identifiants des tarifs récurrents par membre créés dans le tableau de bord Stripe (price_…)
     secuscan_stripe_secret_key: str = ""
@@ -113,6 +124,14 @@ class Settings(BaseSettings):
     secuscan_stripe_price_pro: str = ""
     secuscan_stripe_price_business: str = ""
     secuscan_stripe_api_url: str = "https://api.stripe.com/v1"
+
+    def is_operator(self, email: str) -> bool:
+        return email.strip().lower() in {e.strip().lower() for e in self.secuscan_operator_emails}
+
+    @property
+    def self_service_plans(self) -> bool:
+        """Offre changée librement, sans paiement : hors production, ou démonstration assumée."""
+        return not self.secuscan_production or self.secuscan_billing_demo
 
     @property
     def stripe_enabled(self) -> bool:
@@ -124,6 +143,11 @@ class Settings(BaseSettings):
     secuscan_plan: str = "pro"
     # Dépendances expliquées par l'IA (les plus graves) ; les autres : explication locale depuis OSV
     secuscan_ai_max_dependency_reviews: int = 10
+    # Plafond mensuel de jetons pour toute l'installation, toutes organisations confondues (0 : aucun) :
+    # protège le crédit de la clé OpenRouter, payée par l'exploitant
+    secuscan_ai_monthly_tokens_total: int = 0
+    # Mode formation : avis de l'IA par apprenant et par jour (au-delà : correction automatique seule)
+    secuscan_training_ai_per_day: int = 20
     # Tarifs en $ par million de jetons (Claude Sonnet 5 : 2 $ en entrée, 10 $ en sortie)
     secuscan_ai_price_input_per_mtok: float = 2.0
     secuscan_ai_price_output_per_mtok: float = 10.0
@@ -136,6 +160,10 @@ class Settings(BaseSettings):
     @staticmethod
     def ai_budget_for(plan: str | None) -> tuple[int, int]:
         return PLAN_AI_BUDGETS.get(plan or "free", PLAN_AI_BUDGETS["free"])
+
+    @staticmethod
+    def ai_monthly_tokens_for(plan: str | None) -> int:
+        return PLAN_AI_MONTHLY_TOKENS.get(plan or "free", PLAN_AI_MONTHLY_TOKENS["free"])
 
     def price_per_member(self, plan: str) -> float:
         return {"pro": self.secuscan_price_pro_eur, "business": self.secuscan_price_business_eur}.get(plan, 0.0)
@@ -162,6 +190,9 @@ class Settings(BaseSettings):
             problems.append("SECUSCAN_COOKIE_SECURE doit valoir true (cookie de session réservé au HTTPS)")
         if (self.secuscan_github_client_id or self.secuscan_gitlab_client_id) and not self.secuscan_token_key:
             problems.append("SECUSCAN_TOKEN_KEY est requise pour chiffrer les jetons GitHub / GitLab")
+        if not self.secuscan_operator_emails:
+            problems.append("SECUSCAN_OPERATOR_EMAILS est requise : seuls les opérateurs règlent la clé IA de "
+                            "l'installation (sinon, le premier inscrit en prendrait le contrôle)")
         if not (self.secuscan_web_dist / "index.html").is_file():
             problems.append(f"interface compilée absente ({self.secuscan_web_dist}) : lancer npm run build")
         return problems

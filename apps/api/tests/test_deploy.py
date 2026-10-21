@@ -56,11 +56,12 @@ def test_production_problems(tmp_path):
     dist.mkdir()
     settings = Settings(_env_file=None, secuscan_web_dist=dist, secuscan_github_client_id="placeholder-id")
     problems = " ".join(settings.production_problems())
-    for expected in ("https://", "SECUSCAN_COOKIE_SECURE", "SECUSCAN_TOKEN_KEY", "npm run build"):
+    for expected in ("https://", "SECUSCAN_COOKIE_SECURE", "SECUSCAN_TOKEN_KEY", "npm run build",
+                     "SECUSCAN_OPERATOR_EMAILS"):
         assert expected in problems
     (dist / "index.html").write_text("ok")
     ok = Settings(_env_file=None, secuscan_web_dist=dist, secuscan_public_url="https://secuscan.example.com",
-                  secuscan_cookie_secure=True)
+                  secuscan_cookie_secure=True, secuscan_operator_emails=["ops@example.com"])
     assert ok.production_problems() == []
 
 

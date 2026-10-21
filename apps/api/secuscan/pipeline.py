@@ -147,12 +147,18 @@ class ScanService:
         self._progress(scan, "Analyse des dépendances", 0.35)
         findings += self._dependencies(scan, static.dependencies, redacted)
 
-        enricher = Enricher(self.settings, self.storage, AIBudget(*self.settings.ai_budget_for(self._plan(scan))))
-        findings += self._logic(scan, findings, redacted, enricher)
-
-        findings = self._apply_dismissals(scan, findings, redacted)
-        self._enrich(scan, findings, redacted, enricher)
-        self._record_ai_usage(scan, enricher)
+        max_calls, max_tokens = self.settings.ai_budget_for(self._plan(scan))
+        remaining, reason = self.ai_allowance(scan.org_id or "", self._plan(scan))
+        if reason and self.settings.ai_enabled:
+            scan.summary.warnings.append(reason)
+        enricher = Enricher(self.settings, self.storage,
+                            AIBudget(max_calls if remaining else 0, min(max_tokens, remaining)))
+        try:
+            findings += self._logic(scan, findings, redacted, enricher)
+            findings = self._apply_dismissals(scan, findings, redacted)
+            self._enrich(scan, findings, redacted, enricher)
+        finally:  # même en cas d'échec : les jetons sont dépensés et comptent dans le plafond du mois
+            self._record_ai_usage(scan, enricher)
 
         self._progress(scan, "Calcul du score", 0.97)
         for f in findings:
@@ -393,7 +399,25 @@ class ScanService:
                 f"affichées avec l'explication générique de leur règle."
             )
 
+    def ai_allowance(self, org_id: str, plan: str) -> tuple[int, str | None]:
+        """Jetons IA encore disponibles ce mois-ci (plafond de l'offre et de l'installation) et, s'il est
+        épuisé, le message à afficher."""
+        month = now_iso()[:8] + "01"
+        left = self.settings.ai_monthly_tokens_for(plan) - self.storage.ai_tokens_since(month, org_id)
+        if left <= 0:
+            return 0, (f"Plafond mensuel d'IA de l'offre {plan} atteint : analyse sans IA (règles seules) "
+                       "jusqu'au mois prochain, ou passez à une offre supérieure.")
+        total = self.settings.secuscan_ai_monthly_tokens_total
+        if total:
+            left_total = total - self.storage.ai_tokens_since(month)
+            if left_total <= 0:
+                return 0, "Plafond mensuel d'IA de la plateforme atteint : analyse sans IA (règles seules)."
+            left = min(left, left_total)
+        return left, None
+
     def _record_ai_usage(self, scan: Scan, enricher: Enricher) -> None:
+        self.storage.add_ai_usage(scan.org_id or "", "scan", enricher.stats.tokens, enricher.stats.calls,
+                                  round(enricher.stats.cost_usd(self.settings), 4), user_id=scan.created_by or "")
         s = scan.summary
         s.ai_calls = enricher.stats.calls
         s.ai_cache_hits = enricher.stats.cache_hits

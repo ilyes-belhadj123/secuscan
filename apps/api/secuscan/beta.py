@@ -116,8 +116,7 @@ def metrics(ctx: Context = Depends(require_admin), service: ScanService = Depend
 
 
 def _require_operator(ctx: Context = Depends(current_context), service: ScanService = Depends(get_service)) -> Context:
-    operators = {e.strip().lower() for e in service.settings.secuscan_operator_emails}
-    if ctx.email.lower() not in operators:
+    if not service.settings.is_operator(ctx.email):
         raise HTTPException(403, "Tableau de bord réservé à l'opérateur de la plateforme.")
     return ctx
 

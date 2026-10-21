@@ -16,6 +16,7 @@ Codes retour :
 import argparse
 import json
 import os
+import subprocess
 import sys
 import tempfile
 from dataclasses import dataclass, field
@@ -52,12 +53,43 @@ class CliConfig:
     history: bool = True  # secrets supprimés du code mais encore dans l'historique Git du dépôt analysé
 
 
+CONFIG_FILE = ".secuscan.yml"
+
+
 def load_config(path: Path | None) -> CliConfig:
-    config = CliConfig()
     if path is None or not path.exists():
-        return config
+        return CliConfig()
+    return parse_config(path.read_text(encoding="utf-8"), path)
+
+
+def base_branch_config(root: Path, env: dict | None = None) -> tuple[str | None, str | None]:
+    """(contenu de .secuscan.yml sur la branche cible, référence lue) pour une pull / merge request.
+
+    Une PR ne doit pas pouvoir assouplir son propre blocage (« fail_on: none », « exclude: ["**"] ») ni
+    déclencher des dépenses IA : c'est la configuration de la branche cible qui s'applique. Rien n'est
+    exécuté : git lit seulement un fichier (sans hooks, sans pager)."""
+    env = os.environ if env is None else env
+    refs = [f"origin/{env[k]}" for k in ("GITHUB_BASE_REF", "CI_MERGE_REQUEST_TARGET_BRANCH_NAME") if env.get(k)]
+    refs.append("HEAD^1")  # commit de fusion d'une pull request GitHub : 1er parent = branche cible
+    for ref in refs:
+        try:
+            done = subprocess.run(
+                ["git", "-c", "core.hooksPath=/dev/null", "-c", "core.fsmonitor=false", "--no-pager", "-C", str(root),
+                 "show",
+                 f"{ref}:{CONFIG_FILE}"], capture_output=True, text=True, encoding="utf-8", timeout=20)
+        except (OSError, subprocess.TimeoutExpired):
+            return None, None
+        if done.returncode == 0:
+            return done.stdout, ref
+        if "does not exist" in done.stderr or "exists on disk, but not in" in done.stderr:
+            return "", ref  # la branche cible existe mais n'a pas de configuration : valeurs par défaut
+    return None, None
+
+
+def parse_config(text: str, path: Path | str) -> CliConfig:
+    config = CliConfig()
     try:
-        data = yaml.safe_load(path.read_text(encoding="utf-8")) or {}
+        data = yaml.safe_load(text) or {}
     except yaml.YAMLError as exc:
         raise ConfigError(f"{path} : YAML invalide ({exc})") from exc
     if not isinstance(data, dict):
@@ -153,7 +185,20 @@ def main(argv: list[str] | None = None) -> int:
         print(f"Erreur : {args.path} n'est pas un dossier.", file=sys.stderr)
         return EXIT_USAGE
     try:
-        config = load_config(args.config or args.path / ".secuscan.yml")
+        config = load_config(args.config or args.path / CONFIG_FILE)
+        in_review = args.pr_comment or bool(os.environ.get("GITHUB_BASE_REF")
+                                            or os.environ.get("CI_MERGE_REQUEST_TARGET_BRANCH_NAME"))
+        if in_review and not args.config:
+            base_text, ref = base_branch_config(args.path)
+            own = (args.path / CONFIG_FILE).read_text(encoding="utf-8") if (args.path / CONFIG_FILE).exists() else ""
+            if base_text is None:
+                print(f"Attention : branche cible introuvable, {CONFIG_FILE} de la pull request appliqué tel quel.",
+                      file=sys.stderr)
+            else:
+                if base_text.strip() != own.strip():
+                    print(f"Attention : la pull request modifie {CONFIG_FILE} ; la configuration de la branche "
+                          f"cible ({ref}) s'applique jusqu'à la fusion.", file=sys.stderr)
+                config = parse_config(base_text, f"{ref}:{CONFIG_FILE}")
     except ConfigError as exc:
         print(f"Erreur de configuration : {exc}", file=sys.stderr)
         return EXIT_USAGE

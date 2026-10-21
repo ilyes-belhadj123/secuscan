@@ -71,12 +71,16 @@ def require_admin(ctx: Context = Depends(current_context)) -> Context:
 
 
 def is_installation_admin(service: ScanService, ctx: Context) -> bool:
-    """Opérateur de la plateforme, ou administrateur de la première organisation créée.
+    """Opérateur de la plateforme ; hors production, aussi l'administrateur de la première organisation.
 
-    Les réglages d'installation (clé IA payée pour toutes les organisations) leur sont réservés.
+    Les réglages d'installation (clé IA payée pour toutes les organisations) leur sont réservés. En
+    production, seuls les opérateurs déclarés : le premier visiteur d'une installation neuve ne doit pas
+    pouvoir s'en emparer.
     """
-    if ctx.email.lower() in {e.strip().lower() for e in service.settings.secuscan_operator_emails}:
+    if service.settings.is_operator(ctx.email):
         return True
+    if service.settings.secuscan_production:
+        return False
     return ctx.is_admin and ctx.org_id == service.storage.installation_org_id()
 
 

@@ -33,6 +33,8 @@ from .stripe_billing import sync_seats
 router = APIRouter(prefix="/api")
 login_limiter = LoginRateLimiter()
 reset_limiter = LoginRateLimiter(max_attempts=3, window_seconds=3600)
+# Inscriptions par adresse IP : chaque organisation créée reçoit un budget IA (offre Free)
+register_limiter = LoginRateLimiter(max_attempts=5, window_seconds=3600)
 
 RESET_ACK = ("Si un compte existe pour cette adresse, un e-mail contenant un lien de réinitialisation "
              "(valable 1 heure) vient d'être envoyé.")
@@ -96,17 +98,20 @@ def _me(service: ScanService, ctx: Context) -> dict:
         "org": {"id": ctx.org_id, "name": ctx.org_name, "role": ctx.role, "role_label": ROLE_LABELS[ctx.role],
                 "plan": plan.id, "plan_name": plan.name, "features": sorted(plan.features)},
         "organizations": service.storage.memberships_of(ctx.user_id),
-        "is_operator": ctx.email.lower() in {e.strip().lower() for e in service.settings.secuscan_operator_emails},
+        "is_operator": service.settings.is_operator(ctx.email),
         "can_manage_settings": is_installation_admin(service, ctx),
     }
 
 
 # ---------------------------------------------------------------------- authentification
 @router.post("/auth/register", status_code=201)
-def register(body: RegisterRequest, response: Response, background: BackgroundTasks,
+def register(body: RegisterRequest, request: Request, response: Response, background: BackgroundTasks,
              service: ScanService = Depends(get_service)):
     storage = service.storage
     email = body.email.lower()
+    ip_key = f"ip:{request.client.host if request.client else '?'}"
+    if register_limiter.blocked(ip_key):
+        raise HTTPException(429, "Trop de comptes créés depuis cette adresse. Réessayez plus tard.")
     if problem := password_problem(body.password):
         raise HTTPException(400, problem)
     if storage.get_user_by_email(email):
@@ -118,12 +123,15 @@ def register(body: RegisterRequest, response: Response, background: BackgroundTa
     if not invitation and not (body.org_name or "").strip():
         raise HTTPException(400, "Le nom de l'organisation est obligatoire.")
 
+    register_limiter.fail(ip_key)  # chaque compte créé compte
     user = storage.create_user(email, body.name.strip(), hash_password(body.password))
     if invitation:
         org_id, role = invitation["org_id"], invitation["role"]
         storage.accept_invitation(invitation["id"])
     else:
-        first_org = storage.count_orgs() == 0
+        # Organisation du propriétaire de l'installation : en production, seulement pour un opérateur déclaré
+        first_org = storage.count_orgs() == 0 and (
+            not service.settings.secuscan_production or service.settings.is_operator(email))
         plan = service.settings.secuscan_first_org_plan if first_org else "free"
         org_id, role = storage.create_org(body.org_name.strip(), plan=plan)["id"], "owner"
         if first_org:

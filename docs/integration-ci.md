@@ -50,6 +50,12 @@ Clé `.secuscan.yml` équivalente à `--no-history` : `history: false`.
 Placé à la racine du dossier analysé (ou désigné avec `--config`). Les options de la ligne de
 commande priment sur le fichier ; une clé inconnue est une erreur (code 2).
 
+**Dans une pull request ou une merge request**, c'est le fichier de la **branche cible** qui
+s'applique, lu avec `git show` : une PR ne peut pas assouplir son propre blocage (`fail_on: none`,
+`exclude: ["**"]`) ni activer l'IA à vos frais. Si la PR modifie `.secuscan.yml`, un avertissement
+le signale ; ses changements s'appliqueront après la fusion. Gardez la branche cible disponible
+dans le job (comportement par défaut d'`actions/checkout` pour une pull request).
+
 ```yaml
 fail_on: high            # critical | high | medium | low | none
 exclude:                 # motifs de chemins à ne pas analyser
@@ -131,7 +137,10 @@ Avec `--pr-comment`, SecuScan commente directement la revue de code :
   plus 25), avec l'explication et le correctif proposé quand l'IA est activée (`--ai`) ;
 - **un commentaire de synthèse** (score, alertes par sévérité, seuil de blocage), mis à jour à
   chaque exécution au lieu d'être dupliqué ;
-- une alerte déjà commentée n'est pas commentée une seconde fois après un nouveau push.
+- une alerte déjà commentée n'est pas commentée une seconde fois après un nouveau push ;
+- seuls les commentaires publiés par SecuScan lui-même sont pris en compte : un participant qui
+  recopierait ses marqueurs ne peut ni faire taire une alerte ni bloquer la synthèse. Avec un
+  autre jeton que `GITHUB_TOKEN`, indiquez son compte dans `SECUSCAN_BOT_LOGIN`.
 
 Les alertes des lignes que la PR ne touche pas ne sont pas commentées en ligne : elles figurent dans
 la synthèse. Un échec de publication (jeton manquant, droits insuffisants) est affiché mais ne

@@ -49,7 +49,7 @@ class CallHit:
     origin: int  # ligne d'origine, ou -(n + 1) si la donnée est le paramètre n de la fonction analysée
 
 
-_CALL = re.compile(r"([A-Za-z_$][\w$]*)\s*\(")
+_CALL = re.compile(r"(?<![\w$])([A-Za-z_$][\w$]*)\s*\(")  # en début de mot : coût linéaire
 # Nom de la fonction définie sur une ligne de début de fonction (ce n'est pas un appel)
 _DEFINED_NAME = re.compile(r"(?:\bdef|\bfunction|\bfunc(?:\s*\([^)]*\))?|[\w<>\[\],?]+)\s+(\w+)\s*\(")
 
@@ -104,13 +104,19 @@ SANITIZERS = {
                r"FilenameUtils\.getName)\((?:[^()]|\([^()]*\))*\)"),
 }
 
+# Type Java / C# sans espace ambigu (pas de retour arrière catastrophique sur « public public … ») :
+# nom qualifié, paramètres génériques sur deux niveaux (« Map<String, List<Integer>> »), tableaux
+_TYPE = r"[\w.]+(?:<[^<>=;()]*(?:<[^<>=;()]*>[^<>=;()]*)*>)?\??(?:\[\])*"
+# Lignes plus longues ignorées : aucun code écrit à la main n'en contient (le code minifié est écarté)
+MAX_LINE_LENGTH = 2000
+
 # Affectations : groupe 1 = nom(s) affecté(s), groupe 2 = expression
 ASSIGN = {
-    "python": _r(r"^\s*([A-Za-z_]\w*(?:\s*,\s*[A-Za-z_]\w*)*)\s*(?::\s*[\w\[\], .|]+)?\s*\+?=(?!=)\s*(.+)$"),
-    "javascript": _r(r"^\s*(?:const|let|var)?\s*(\{[^}]*\}|\[[^\]]*\]|[A-Za-z_$][\w$]*)\s*(?::\s*[\w<>\[\]|]+)?"
+    "python": _r(r"^\s*([A-Za-z_]\w*(?:\s*,\s*[A-Za-z_]\w*)*)\s*(?::[^=\n]*)?\+?=(?!=)\s*(.+)$"),
+    "javascript": _r(r"^\s*(?:(?:const|let|var)\s+)?(\{[^}]*\}|\[[^\]]*\]|[A-Za-z_$][\w$]*)\s*(?::\s*[\w<>\[\]|]+)?"
                      r"\s*\+?=(?![=>])\s*(.+)$"),
     "php": _r(r"^\s*\$(\w+)\s*\.?=(?![=>])\s*(.+)$"),
-    "java": _r(r"^\s*(?:final\s+)?(?:[\w.<>\[\], ?]+\s+)?([A-Za-z_]\w*)\s*\+?=(?!=)\s*(.+)$"),
+    "java": _r(rf"^\s*(?:final\s+)?(?:{_TYPE}\s+)?([A-Za-z_]\w*)\s*\+?=(?!=)\s*(.+)$"),
 }
 
 SINKS: dict[str, list[Sink]] = {
@@ -193,8 +199,8 @@ _FUNCTION_START = {
     "javascript": _r(r"\bfunction\b[^(]*\(|=>\s*\{\s*$"),
     "php": _r(r"\bfunction\s+\w+\s*\("),
     "java": _r(r"^(?!\s*(try|if|for|while|switch|catch|synchronized|return|else|do|new)\b)"
-               r"\s*(public|private|protected|static|final|synchronized|\s)*[\w<>\[\], ?]+\s+\w+\s*\([^;]*\)\s*"
-               r"(throws\s+[\w., ]+)?\s*\{?\s*$"),
+               r"\s*(?:(?:public|private|protected|static|final|synchronized|abstract|default)\s+)*"
+               rf"{_TYPE}\s+\w+\s*\([^;]*\)\s*(?:throws\s+[\w.]+(?:\s*,\s*[\w.]+)*)?\s*\{{?\s*$"),
 }
 # Paramètres reçus du client par annotation (Spring) : teintés dès la signature
 # Le type n'est pas numérique, booléen, UUID ou date : une telle valeur ne peut pas porter de texte
@@ -212,7 +218,7 @@ SANITIZERS["go"] = _r(r"\b(html\.EscapeString|template\.HTMLEscapeString|url\.Pa
                       r"filepath\.Base|path\.Base|strconv\.(Atoi|ParseInt|ParseUint|ParseFloat|ParseBool))\((?:[^()]|\((?:[^()]|\([^()]*\))*\))*\)"
                       # sortie d'un programme lancé sans shell : produite par le programme, pas par le client
                       r"|exec\.Command(Context)?\((?:[^()]|\((?:[^()]|\([^()]*\))*\))*\)\.(Output|CombinedOutput)\(\)")
-ASSIGN["csharp"] = _r(r"^\s*(?:using\s+)?(?:var|[\w.<>\[\]?]+)?\s*([A-Za-z_]\w*)\s*\+?=(?![=>])\s*(.+)$")
+ASSIGN["csharp"] = _r(rf"^\s*(?:using\s+)?(?:(?:var|{_TYPE})\s+)?([A-Za-z_]\w*)\s*\+?=(?![=>])\s*(.+)$")
 ASSIGN["go"] = _r(r"^\s*([A-Za-z_]\w*(?:\s*,\s*[A-Za-z_]\w*)*)\s*:?=(?!=)\s*(.+)$")
 SINKS["csharp"] = [
     Sink("CS-SQLI-FLOW", "sql", _r(r"new\s+SqlCommand\(|\.(ExecuteSqlRaw|ExecuteSqlRawAsync|FromSqlRaw|SqlQueryRaw)\(")),
@@ -242,11 +248,11 @@ _PLAIN_STRINGS["csharp"] = _r(r"(?P<keep>\$@?\"(?:[^\"\\]|\\.)*\")|@?\"(?:[^\"\\
 _PLAIN_STRINGS["go"] = _r(r"\"(?:[^\"\\]|\\.)*\"|`[^`]*`")
 _FUNCTION_START["csharp"] = _r(r"^(?!\s*(try|if|for|foreach|while|switch|catch|using|lock|return)\b)"
                                r"\s*(public|private|protected|internal)\s+(static\s+|async\s+|virtual\s+|override\s+)*"
-                               r"[\w<>\[\], ?]+\s+\w+\s*\(")
+                               rf"{_TYPE}\s+\w+\s*\(")
 _FUNCTION_START["go"] = _r(r"^\s*func\b")
 # ASP.NET : les paramètres texte d'une action de contrôleur sont remplis à partir de la requête
 _CS_CONTROLLER = _r(r":\s*(Controller|ControllerBase)\b|\[ApiController\]")
-_CS_ACTION = _r(r"^\s*public\s+(async\s+)?(virtual\s+)?[\w<>\[\], ?]+\s+\w+\s*\(([^)]*)\)")
+_CS_ACTION = _r(rf"^\s*public\s+(async\s+)?(virtual\s+)?{_TYPE}\s+\w+\s*\(([^)]*)\)")
 _CS_TEXT_PARAM = _r(r"(\[From\w+[^\]]*\]\s*)?\b(string|object|dynamic|IFormFile|JsonElement)\??\s+(\w+)")
 
 _COMMENT = _r(r"^\s*(#|//|/?\*)")
@@ -335,7 +341,7 @@ def find_flows(source: SourceFile, initial: dict[str, int] | None = None, first_
     controller = language == "csharp" and bool(_CS_CONTROLLER.search(source.content))
     scope_indent = -1  # indentation du dernier début de fonction
     for idx, line in enumerate(source.content.split("\n"), start=first_line):
-        if not line.strip() or _COMMENT.match(line):
+        if not line.strip() or _COMMENT.match(line) or len(line) > MAX_LINE_LENGTH:
             continue
         defined = None
         if _FUNCTION_START[language].search(line):

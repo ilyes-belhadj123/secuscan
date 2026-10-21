@@ -18,7 +18,7 @@ from dataclasses import dataclass
 
 from ..ingest import SourceFile
 from .comments import without_block_comments
-from .taint import KINDS, SINKS, CallHit, ParamSink, find_flows, split_arguments
+from .taint import _TYPE, KINDS, MAX_LINE_LENGTH, SINKS, CallHit, ParamSink, find_flows, split_arguments
 
 MAX_ROUNDS = 4
 # Noms trop courants pour être reliés sans ambiguïté à une définition précise
@@ -39,9 +39,9 @@ _DEFS = {
     ],
     "php": [re.compile(r"^(\s*)(?:(?:public|private|protected|static|final)\s+)*function\s+(\w+)\s*\(([^)]*)\)")],
     "java": [re.compile(r"^(\s*)(?:(?:public|private|protected|static|final|synchronized|abstract)\s+)+"
-                        r"[\w<>\[\],.? ]+\s+(\w+)\s*\(([^)]*)\)")],
+                        rf"{_TYPE}\s+(\w+)\s*\(([^)]*)\)")],
     "csharp": [re.compile(r"^(\s*)(?:(?:public|private|protected|internal|static|async|virtual|override|sealed)\s+)+"
-                          r"[\w<>\[\],.? ]+\s+(\w+)\s*\(([^)]*)\)")],
+                          rf"{_TYPE}\s+(\w+)\s*\(([^)]*)\)")],
     "go": [re.compile(r"^()func\s+(?:\([^)]*\)\s*)?(\w+)\s*\(([^)]*)\)")],
 }
 _DEFS["typescript"] = _DEFS["javascript"]
@@ -100,6 +100,8 @@ def extract_functions(source: SourceFile) -> list[Function]:
     lines = source.content.split("\n")
     out = []
     for idx, line in enumerate(lines):
+        if len(line) > MAX_LINE_LENGTH:
+            continue
         for pattern in _DEFS.get(source.language, ()):
             m = pattern.match(line)
             if not m or m.group(2) in _KEYWORDS:

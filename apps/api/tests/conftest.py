@@ -30,6 +30,7 @@ def api(service):
     deps.set_service(service)
     accounts.login_limiter._failures.clear()
     accounts.reset_limiter._failures.clear()
+    accounts.register_limiter._failures.clear()
     yield lambda: TestClient(app)
     deps.set_service(None)
 

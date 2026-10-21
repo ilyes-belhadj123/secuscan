@@ -155,6 +155,9 @@ def select_plan(body: PlanRequest, ctx: Context = Depends(current_context), serv
         if service.settings.stripe_enabled:
             from .stripe_billing import request_plan_change  # import local : stripe_billing dépend de ce module
             return request_plan_change(service, ctx, body.plan)
+        if not (service.settings.self_service_plans or service.settings.is_operator(ctx.email)):
+            raise HTTPException(
+                402, "Le paiement en ligne n'est pas encore disponible : contactez-nous pour changer d'offre.")
         invoice = change_plan(service, ctx.org_id, body.plan, ctx.email)
     except QuotaExceeded as exc:
         raise HTTPException(409, str(exc)) from exc

@@ -2,7 +2,8 @@
 
 Règles (documentées pour les clients) :
 - Sévérité initiale = sévérité de la règle (ou de l'advisory pour les dépendances).
-- Verdict IA « faux positif » avec confiance >= 0,7 → alerte masquée (statut false_positive).
+- Verdict IA « faux positif » avec confiance >= 0,7 (>= 0,9 pour une alerte critique) → alerte masquée
+  (statut false_positive).
 - Verdict IA « incertain » sur une alerte critique → rétrogradée en « élevée ».
 - Fichier de test ou d'exemple (tests/, *_test.*, spec, fixtures) → rétrogradée d'un niveau.
 - Score = 100 × e^(−pénalité / 150), pénalité = Σ poids des alertes ouvertes
@@ -18,6 +19,8 @@ _LEVELS = [Severity.critical, Severity.high, Severity.medium, Severity.low]
 _TEST_PATH = re.compile(r"(^|/)(tests?|__tests__|spec|fixtures|examples?)(/|$)|[._-](test|spec)\.\w+$", re.I)
 
 FALSE_POSITIVE_CONFIDENCE = 0.7
+# Une alerte critique n'est écartée que sur un avis très sûr : l'IA peut se tromper ou être influencée
+CRITICAL_FALSE_POSITIVE_CONFIDENCE = 0.9
 
 
 def downgrade(severity: Severity) -> Severity:
@@ -33,7 +36,9 @@ def apply_severity(finding: Finding) -> None:
     # Seules les alertes de code (règles ou revue IA) peuvent être écartées par l'IA : un secret masqué
     # ou une version vulnérable reste un fait, quel que soit le contexte.
     if ai and finding.kind in ("sast", "ai"):
-        if ai.verdict == "false_positive" and ai.confidence >= FALSE_POSITIVE_CONFIDENCE:
+        threshold = (CRITICAL_FALSE_POSITIVE_CONFIDENCE if finding.raw_severity == Severity.critical
+                     else FALSE_POSITIVE_CONFIDENCE)
+        if ai.verdict == "false_positive" and ai.confidence >= threshold:
             if finding.status == "open":
                 finding.status = "false_positive"
         elif ai.verdict == "uncertain" and severity == Severity.critical:

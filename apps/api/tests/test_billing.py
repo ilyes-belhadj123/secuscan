@@ -125,3 +125,25 @@ def test_webhook_updates_plan(api, service, free_org):
 def test_billing_requires_login(api):
     assert api().get("/api/billing").status_code == 401
     assert api().post("/api/billing/plan", json={"plan": "pro"}).status_code == 401
+
+
+def test_production_without_payment_refuses_free_upgrades(api, service, free_org):
+    service.settings.secuscan_production = True
+    service.settings.secuscan_operator_emails = ["ops@example.com"]
+    resp = free_org.post("/api/billing/plan", json={"plan": "business"})
+    assert resp.status_code == 402 and "paiement" in resp.json()["detail"]
+    assert free_org.get("/api/auth/me").json()["org"]["plan"] == "free"
+    # Démonstration assumée : autorisé
+    service.settings.secuscan_billing_demo = True
+    assert free_org.post("/api/billing/plan", json={"plan": "pro"}).status_code == 200
+
+
+def test_production_first_visitor_does_not_own_the_installation(api, service):
+    service.settings.secuscan_production = True
+    service.settings.secuscan_operator_emails = ["ops@example.com"]
+    first = register(api(), "jane.doe@example.com", org_name="Acme Corp")
+    me = first.get("/api/auth/me").json()
+    assert me["org"]["plan"] == "free" and not me["can_manage_settings"]
+    assert first.get("/api/settings/ai").status_code == 403
+    operator = register(api(), "ops@example.com", org_name="Exploitation")
+    assert operator.get("/api/auth/me").json()["can_manage_settings"]

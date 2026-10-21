@@ -35,7 +35,7 @@ def search_orders():
 @app.route("/api/orders/count")
 def count_orders():
     # Requête construite par concaténation mais uniquement avec une constante :
-    # aucune donnée utilisateur, donc pas d'injection possible (faux positif attendu).
+    # aucune donnée utilisateur, donc pas d'injection possible.
     table = "orders"
     db = get_db()
     cursor = db.cursor()

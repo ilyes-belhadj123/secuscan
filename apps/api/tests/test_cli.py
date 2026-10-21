@@ -80,3 +80,25 @@ def test_sarif_output(project, tmp_path):
     assert result["partialFingerprints"]["secuscanFingerprint/v1"]
     rule = next(r for r in run["tool"]["driver"]["rules"] if r["id"] == "PY-CMDI")
     assert rule["properties"]["security-severity"] == "9.5" and "CWE-78" in rule["properties"]["tags"]
+
+
+def _git(root, *args):
+    import subprocess
+    subprocess.run(["git", "-c", "user.email=ci@example.com", "-c", "user.name=CI", "-c", "commit.gpgsign=false",
+                    "-C", str(root), *args], check=True, capture_output=True)
+
+
+def test_pull_request_cannot_relax_its_own_blocking(project, monkeypatch, capsys):
+    """La PR remplace fail_on: high par none : la configuration de la branche cible s'applique."""
+    (project / ".secuscan.yml").write_text("fail_on: high\n", encoding="utf-8")
+    _git(project, "init", "-q", "-b", "main")
+    _git(project, "add", ".")
+    _git(project, "commit", "-q", "-m", "base")
+    _git(project, "update-ref", "refs/remotes/origin/main", "HEAD")  # comme après actions/checkout
+    (project / ".secuscan.yml").write_text("fail_on: none\nexclude: ['**']\nai: true\n", encoding="utf-8")
+    monkeypatch.setenv("GITHUB_BASE_REF", "main")
+    assert cli.main(["scan", str(project), "--no-history"]) == EXIT_THRESHOLD
+    assert "modifie .secuscan.yml" in capsys.readouterr().err
+    # Hors pull request (branche principale) : le fichier du dépôt s'applique normalement
+    monkeypatch.delenv("GITHUB_BASE_REF")
+    assert cli.main(["scan", str(project), "--no-history"]) == EXIT_OK

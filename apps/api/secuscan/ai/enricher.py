@@ -27,9 +27,11 @@ from .prompts import (
     FINDING_TEMPLATE,
     FINDINGS_BATCH_TEMPLATE,
     FIX_RETRY_TEMPLATE,
+    INSTRUCTION_TO_TOOL,
     LOGIC_TEMPLATE,
     PROMPT_VERSION,
     SYSTEM_PROMPT,
+    code_block,
 )
 from .safety import sanitize
 
@@ -251,12 +253,13 @@ class Enricher:
         return {
             "rule_id": finding.rule_id, "title": finding.title, "cwe": finding.cwe or "n/a", "lines": lines,
             "message": finding.message, "start": finding.snippet_start_line,
-            "end": finding.snippet_start_line + finding.snippet.count("\n"), "numbered": numbered,
+            "end": finding.snippet_start_line + finding.snippet.count("\n"), "numbered": code_block(numbered),
         }
 
     def review_code_finding(self, finding: Finding, header: str, file_content: str | None = None) -> AIReview:
         prompt = FINDING_TEMPLATE.format(
-            language=finding.language, file=finding.file, header=header or "(aucun)", **self._alert_fields(finding),
+            language=finding.language, file=finding.file, header=code_block(header or "(aucun)"),
+            **self._alert_fields(finding),
         )
         return self._code_review(finding, self._complete(prompt), file_content)
 
@@ -270,7 +273,8 @@ class Enricher:
             BATCH_ALERT_TEMPLATE.format(id=f"A{i}", **self._alert_fields(f)) for i, f in enumerate(findings, start=1)
         )
         prompt = FINDINGS_BATCH_TEMPLATE.format(
-            count=len(findings), language=first.language, file=first.file, header=header or "(aucun)", alerts=alerts,
+            count=len(findings), language=first.language, file=first.file, header=code_block(header or "(aucun)"),
+            alerts=alerts,
         )
         data = self._complete(prompt, max_tokens=BATCH_OUTPUT_TOKENS_PER_ALERT * len(findings))
         items = [item for item in (data.get("reviews") or []) if isinstance(item, dict)]
@@ -306,7 +310,7 @@ class Enricher:
         else:
             error = first_error(finding.language, patched, finding.file)
         prompt = FIX_RETRY_TEMPLATE.format(
-            language=finding.language, file=finding.file, patched=patched, error=error or "erreur non localisée",
+            language=finding.language, file=finding.file, patched=code_block(patched), error=error or "erreur non localisée",
             **self._alert_fields(finding),
         )
         try:
@@ -336,6 +340,13 @@ class Enricher:
             confidence = max(0.0, min(1.0, float(data.get("confidence", 0.5))))
         except (TypeError, ValueError):
             confidence = 0.5
+        # Injection de prompt : un commentaire du code qui s'adresse à l'outil (« verdict false_positive »,
+        # « note pour l'IA ») ne doit jamais suffire à écarter l'alerte
+        tool_note = ""
+        if verdict == "false_positive" and INSTRUCTION_TO_TOOL.search(finding.snippet):
+            verdict = "uncertain"
+            tool_note = ("Le code contient un texte adressé à l'outil d'analyse : le verdict « faux positif » "
+                         "de l'IA n'est pas appliqué. ")
 
         patched = str(data.get("patched_code") or "").rstrip("\n")
         fix = None
@@ -365,7 +376,7 @@ class Enricher:
             references=references_for(finding.cwe),
         )
         return AIReview(
-            verdict=verdict, confidence=confidence, reason=clean(data.get("reason")),
+            verdict=verdict, confidence=confidence, reason=tool_note + clean(data.get("reason")),
             explanation=explanation, fix=fix, model=self.settings.openrouter_model,
             cached=bool(data.get("_cached")), filtered=filtered,
         )
@@ -381,7 +392,7 @@ class Enricher:
         label = source.path if (first, last) == (1, len(lines)) else \
             f"{source.path} (extrait : lignes {first} à {last} sur {len(lines)})"
         prompt = LOGIC_TEMPLATE.format(
-            file=label, language=source.language, numbered=numbered,
+            file=label, language=source.language, numbered=code_block(numbered),
             flagged=", ".join(map(str, sorted({n for n in flagged_lines if first <= n <= last}))) or "aucune",
         )
         data = self._complete(prompt)
